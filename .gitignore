@@ -1,0 +1,4 @@
+ISO-80000.xmi
+.venv/
+__pycache__/
+.pytest_cache/
