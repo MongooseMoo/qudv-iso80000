@@ -3,8 +3,9 @@
 ISO-80000 XMI to YAML converter.
 
 Reads the OMG SysML QUDV model library
-(http://www.omg.org/spec/SysML/20150709/ISO-80000.xmi) and emits a ``scalars``
-list of unit families. Every emitted family has resolved dimensions, a canonical unit
+(http://www.omg.org/spec/SysML/20150709/ISO-80000.xmi). ``--format catalog``
+preserves source declarations and separates derived information and diagnostics.
+The default emits a ``scalars`` list of unit families. Every family has resolved dimensions, a canonical unit
 whose factor is exactly 1, and unit factors relative to that canonical.
 Quantity kinds the library does not define well enough are never emitted with
 empty placeholders; they are listed, with the reason, in the header comment and
@@ -16,6 +17,7 @@ Usage:
 
 import argparse
 import ast
+import hashlib
 import html
 import math
 import re
@@ -42,7 +44,8 @@ DIM_MAP = {
 }
 
 KIND_CLASSES = {'SimpleQuantityKind', 'DerivedQuantityKind'}
-UNIT_CLASSES = {'SimpleUnit', 'DerivedUnit', 'PrefixedUnit', 'LinearConversionUnit'}
+UNIT_CLASSES = {'SimpleUnit', 'DerivedUnit', 'PrefixedUnit', 'LinearConversionUnit',
+                'AffineConversionUnit', 'GeneralConversionUnit'}
 
 
 class ConversionError(Exception):
@@ -119,10 +122,17 @@ class Factor:
             return head if r.denominator == 1 else f'{head}/{r.denominator}'
         return self.as_float()
 
+    def exact_record(self):
+        """Catalog representation; arbitrary powers of pi remain symbolic."""
+        if self.inexact is not None:
+            return {'approximate': self.inexact}
+        return {'rational': str(self.rational), 'pi_exponent': self.pi_exp}
+
 
 def evaluate_constant(expr):
     """Evaluate a QUDV literal body such as '10^3', '(2^10)^2', 'Pi/180', 'ln(10)'."""
-    tree = ast.parse(expr.replace('^', '**'), mode='eval')
+    source = expr.replace('^', '**')
+    tree = ast.parse(source, mode='eval')
 
     def walk(node):
         if isinstance(node, ast.Expression):
@@ -130,7 +140,7 @@ def evaluate_constant(expr):
         if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
             return Factor(Fraction(node.value))
         if isinstance(node, ast.Constant) and isinstance(node.value, float):
-            return Factor(Fraction(str(node.value)))
+            return Factor(Fraction(ast.get_source_segment(source, node)))
         if isinstance(node, ast.Name) and node.id == 'Pi':
             return Factor(pi_exp=1)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
@@ -155,12 +165,18 @@ def evaluate_constant(expr):
 class ISO80000Converter:
     def __init__(self, xmi_file):
         print(f'Loading {xmi_file}...', file=sys.stderr)
-        root = etree.parse(xmi_file).getroot()
+        with open(xmi_file, 'rb') as handle:
+            source = handle.read()
+        self.source_hash = hashlib.sha256(source).hexdigest()
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        root = etree.fromstring(source, parser=parser)
         self.by_id = {}
         self.instances = []
         for elem in root.iter():
             elem_id = elem.get(XMI_ID)
             if elem_id:
+                if elem_id in self.by_id:
+                    raise ConversionError(f'duplicate XMI id {elem_id!r}')
                 self.by_id[elem_id] = elem
             if elem.get(XMI_TYPE) == 'uml:InstanceSpecification':
                 self.instances.append(elem)
@@ -174,6 +190,7 @@ class ISO80000Converter:
         self._kind_dims = {}
         self._unit_dims = {}
         self._unit_si = {}
+        self._scalars = None
 
     # --- XMI access -------------------------------------------------------
 
@@ -416,7 +433,11 @@ class ISO80000Converter:
         unit = self.units[unit_id]
 
         result = None
-        if unit['class'] == 'DerivedUnit':
+        if unit['class'] in {'AffineConversionUnit', 'GeneralConversionUnit'}:
+            # These definitions are preserved in the catalog, never flattened
+            # to a multiplicative factor (including through reference chains).
+            result = None
+        elif unit['class'] == 'DerivedUnit':
             if unit['factors']:
                 result = Factor()
                 for factor_unit, exponent in unit['factors']:
@@ -500,7 +521,7 @@ class ISO80000Converter:
                 unit_dims = self.unit_dims(unit_id)
                 factor = self.unit_si_factor(unit_id)
                 if factor is None:
-                    self.problems.append((unit['name'], f'unit of {name!r}: factor or dimensions unresolved'))
+                    self.problems.append((unit['name'], f'unit of {name!r}: non-multiplicative conversion or unresolved factor'))
                 elif unit_dims != dims:
                     self.problems.append((unit['name'], f'unit of {name!r}: dimensions {_show(unit_dims)} differ from kind {_show(dims)}'))
                 else:
@@ -550,13 +571,122 @@ class ISO80000Converter:
         ))
 
     def convert(self):
+        if self._scalars is not None:
+            return self._scalars
         self.load_model()
         self.assign_units()
         scalars = self.build_scalars()
         print(f'  emitted {len(scalars)} of {len(self.kinds)} quantity kinds, '
               f"{sum(len(s['units']) for s in scalars)} unit entries; "
               f'{len(self.problems)} problems', file=sys.stderr)
+        self._scalars = scalars
         return scalars
+
+    @staticmethod
+    def _source_tree(elem):
+        """Preserve opaque specification syntax without evaluating its language."""
+        result = {'tag': elem.tag}
+        if elem.attrib:
+            result['attributes'] = dict(sorted(elem.attrib.items()))
+        if elem.text and elem.text.strip():
+            result['text'] = elem.text
+        if elem.tail and elem.tail.strip():
+            result['tail'] = elem.tail
+        children = [ISO80000Converter._source_tree(child) for child in elem
+                    if isinstance(child.tag, str)]
+        if children:
+            result['children'] = children
+        return result
+
+    @classmethod
+    def _source_value(cls, elem):
+        reference = elem.get(XMI_IDREF)
+        instance = elem.find('./instance')
+        if reference is None and instance is not None:
+            reference = instance.get(XMI_IDREF)
+        if reference is not None:
+            return {'ref': reference}
+        if elem.get('href') is not None:
+            return {'href': elem.get('href')}
+        if elem.get(XMI_TYPE, '').startswith('uml:Literal'):
+            value = elem.get('value')
+            if value is None:
+                inner = elem.find('./value')
+                value = inner.text if inner is not None else elem.text
+            return {'type': elem.get(XMI_TYPE), 'value': value or ''}
+        return {'xml': cls._source_tree(elem)}
+
+    def catalog(self):
+        """Source declarations plus separately labelled derived information.
+
+        IDs are scoped to the source SHA-256. Source slots retain their full
+        feature URIs; local feature names are conveniences, not global identity.
+        Unresolved declarations and unknown expression languages remain data.
+        """
+        declarations = {}
+        for elem in self.instances:
+            identifier = elem.get(XMI_ID)
+            if not identifier:
+                raise ConversionError('instance specification has no XMI id')
+            record = {'class': self.class_of(elem), 'name': self.name_of(elem),
+                      'classifiers': [dict(c.attrib) for c in elem.findall('./classifier')],
+                      'slots': {}, 'features': {}}
+            for slot in elem.findall('./slot'):
+                feature = slot.find('./definingFeature')
+                if feature is None or not feature.get('href'):
+                    raise ConversionError(f'{identifier}: slot has no defining feature URI')
+                uri = feature.get('href')
+                name = uri.rsplit('.', 1)[-1]
+                if name in record['slots']:
+                    raise ConversionError(f'{identifier}: duplicate slot name {name!r}')
+                record['features'][name] = uri
+                record['slots'][name] = [self._source_value(v) for v in slot.findall('./value')]
+            specification = elem.find('./specification')
+            if specification is not None:
+                record['specification'] = self._source_tree(specification)
+            declarations[identifier] = record
+
+        def dimensions(dims):
+            return None if dims is None else {
+                key: value.numerator if value.denominator == 1 else str(value)
+                for key, value in sorted(dims.items())}
+
+        kinds = {}
+        units = {}
+        # Catalog extraction must survive an expression the scalar projection
+        # cannot interpret. Never publish a partially completed derived view.
+        try:
+            self.convert()
+            kinds = {identifier: {'dimensions': dimensions(self.kind_dims(identifier))}
+                     for identifier in sorted(self.kinds)}
+            for identifier in sorted(self.units):
+                factor = self.unit_si_factor(identifier)
+                units[identifier] = {
+                    'dimensions': dimensions(self.unit_dims(identifier)),
+                    'si_factor': None if factor is None else factor.exact_record(),
+                }
+        except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
+            kinds, units = {}, {}
+            self.problems.append(('derived analysis', str(error)))
+        numbers = {}
+        for identifier, record in sorted(declarations.items()):
+            if record['class'] in {'Integer', 'Real', 'Rational'}:
+                try:
+                    numbers[identifier] = self.constant(self.by_id[identifier]).exact_record()
+                except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
+                    self.problems.append((record['name'] or identifier, f'number: {error}'))
+        return {
+            'schema_version': 1,
+            'source': {'sha256': self.source_hash, 'format': 'OMG-QUDV-XMI'},
+            'declarations': dict(sorted(declarations.items())),
+            'resolved': {'kinds': kinds, 'units': units, 'numbers': numbers},
+            'diagnostics': {
+                'problems': [{'subject': subject, 'reason': reason}
+                             for subject, reason in sorted(set(self.problems))],
+                'corrections': [{'subject': subject, 'reason': reason}
+                                for subject, reason in sorted(set(self.corrections))],
+            },
+        }
 
 
 def _show(dims):
@@ -581,13 +711,18 @@ def main():
     parser = argparse.ArgumentParser(description='ISO-80000 XMI to YAML converter.')
     parser.add_argument('xmi', nargs='?', default='ISO-80000.xmi')
     parser.add_argument('-o', '--output', help='write YAML here instead of stdout')
+    parser.add_argument('--format', choices=('scalars', 'catalog'), default='scalars',
+                        help='legacy unit families or source-preserving catalog (schema 1)')
     parser.add_argument('--strict', action='store_true',
-                        help='exit 1 when any kind or unit could not be emitted')
+                        help='exit 1 on resolution gaps, even if preserved in the catalog')
     args = parser.parse_args()
 
     converter = ISO80000Converter(args.xmi)
-    scalars = converter.convert()
-    text = render(scalars, converter.problems, converter.corrections)
+    if args.format == 'catalog':
+        text = yaml.safe_dump(converter.catalog(), sort_keys=False, allow_unicode=True)
+    else:
+        scalars = converter.convert()
+        text = render(scalars, converter.problems, converter.corrections)
     if args.output:
         with open(args.output, 'w', encoding='utf-8', newline='\n') as handle:
             handle.write(text)
@@ -596,7 +731,8 @@ def main():
     for subject, what in sorted(set(converter.corrections)):
         print(f'  corrected: {subject}: {what}', file=sys.stderr)
     for subject, reason in sorted(converter.problems):
-        print(f'  not emitted: {subject}: {reason}', file=sys.stderr)
+        label = 'unresolved in derived view' if args.format == 'catalog' else 'not emitted'
+        print(f'  {label}: {subject}: {reason}', file=sys.stderr)
     return 1 if args.strict and converter.problems else 0
 
 

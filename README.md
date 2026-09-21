@@ -2,7 +2,9 @@
 
 `iso80000_converter.py` reads the OMG SysML QUDV model library for ISO/IEC 80000
 and writes its quantity kinds, dimensions, units, exact conversion factors and
-unit symbols as YAML: one `scalars` list of unit families, shown below.
+unit symbols as YAML. Use `--format catalog` to retain the source declarations
+and relationships; the default `scalars` format is the older multiplicative
+unit-family projection.
 
 The source is the machine-readable OMG library, not the ISO documents. It is not
 checked in (92 MB). Download it once:
@@ -15,15 +17,56 @@ curl -L -o ISO-80000.xmi http://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
 
 ```bash
 uv run python iso80000_converter.py ISO-80000.xmi -o iso80000.yml
+uv run python iso80000_converter.py ISO-80000.xmi --format catalog -o catalog.yml
 uv run python iso80000_converter.py ISO-80000.xmi --strict   # exit 1 if anything was not emitted
 ```
 
 Without `-o` the YAML goes to stdout. Progress, corrections and everything that
-was not emitted go to stderr, and are repeated in the header comment of the YAML.
+was not resolved into scalar families go to stderr. Diagnostics are repeated in
+the scalar YAML header or in structured catalog fields. `--strict` exits 1 for
+these resolution gaps in either format, after writing the output; a catalog
+can preserve declarations even when its derived analysis is incomplete.
+
+## Source-preserving catalog (schema version 1)
+
+The catalog is an intermediate source graph, not an executable Physica model.
+It has these sections:
+
+- `source`: input SHA-256 and format. IDs are scoped to this source hash; a
+  same-looking name in another catalog does not establish identity.
+- `declarations`: all XMI instance specifications keyed by their original IDs,
+  including kinds, units, prefixes, constants, factors, systems and association
+  instances. Each has its source class/name/classifier references, `slots` and
+  full defining-feature URIs in `features`. Local slot names are conveniences.
+- Slot values are `{ref: source_id}`, `{href: external_uri}`, typed literal
+  text, or an opaque XML tree. Numeric specifications retain their original
+  body/language tree. Expressions are data; arbitrary source code is never run.
+- `resolved`: separately derived kind dimensions, multiplicative SI unit
+  factors, and numbers. Exact numbers use `rational` and `pi_exponent`;
+  approximate numbers use only `approximate`. Missing dimensions/factors are
+  `null`, never a fabricated dimension-one value or identity conversion.
+- `diagnostics`: structured `problems` and `corrections`. Corrections made by
+  the existing inference rules affect the derived view, never source slots.
+
+Affine and general conversions retain their factor/offset/reference or
+expression/language slots. They have no multiplicative `si_factor`, including
+when reached through a prefix or reference chain. A consumer must interpret
+the declared conversion semantics; this exporter does not evaluate nonlinear
+conversions. Unsupported numeric expressions remain in declarations and are
+reported. If one prevents derived unit analysis, that derived view is empty
+rather than partially published; independently resolvable numbers remain.
+
+The catalog includes unresolved kinds, fractional dimension exponents, and
+exact powers of pi that cannot be represented by the legacy scalar format.
+Duplicate XMI IDs or colliding local slot names are rejected, not overwritten.
+Output has no timestamps or machine-local paths and is deterministic for the
+same source and exporter. The source SHA-256 identifies bytes, not correctness.
 
 ## What it emits
 
-Against the 2015-07-09 library: **317 of 325 quantity kinds**, 7511 unit entries.
+Against the 2015-07-09 library: **316 of 325 quantity kinds**, 7490 unit entries
+in scalar format; the catalog retains all **325 kinds and 2795 units**.
+Unit entries count memberships in families, not distinct units.
 Every emitted family has resolved dimensions, at least one unit, and a canonical
 unit whose factor is exactly 1. Nothing is emitted with `dimensions: {}` as a
 placeholder; `{}` means dimension one.
@@ -89,6 +132,15 @@ lists it under "contradictions" in the output header:
 - `initial phase of electric current` and `initial phase of electric voltage` are
   flagged dimension one but carry factors (current, voltage). The flag is used.
 
+The library's Celsius affine unit refers to the offset **273.16**, whereas the
+[BIPM SI Brochure](https://www.bipm.org/en/publications/si-brochure) specifies
+273.15. The catalog preserves the source value (exactly `6829/25`); it does not
+silently repair it. An attributed correction is needed before using this
+definition for physical conversion. No Celsius-specific correction is embedded
+in the exporter. The prior exporter skipped the affine unit and incorrectly
+borrowed kelvin-scaled units for `CelsiusTemperature`; that family is now
+excluded from scalar output. Regression tests preserve this distinction.
+
 ## What the library does not contain
 
 Reported, never guessed:
@@ -98,9 +150,7 @@ Reported, never guessed:
 - `weber per metre` is modelled as weber x metre; it disagrees with magnetic vector
   potential and is left out of that family.
 - `kelvin to the power minus one`, `pascal to the power minus one`,
-  `square metre per second` and the prefixed `degree celsius` units name no kind.
-- No affine units. `CelsiusTemperature` is emitted with kelvin-scaled units and no
-  offset; the 273.15 has to be authored by the consumer.
+  and `square metre per second` name no kind (nor do their prefixes).
 - No prefixed seconds (there is no millisecond), and no non-SI units beyond the
   few ISO 80000 accepts (minute, hour, day, tonne, degree, gon, byte, bel).
 - No operation rules. A derived kind's factor product is the only statement of
@@ -112,7 +162,10 @@ Reported, never guessed:
 uv run pytest
 ```
 
-The constant, factor and symbol tests always run. The library-backed tests run
+The constant, factor, symbol and synthetic XMI catalog tests always run. The latter
+cover affine/general definitions, prefix reference chains, source preservation,
+unresolved kinds, exact decimal and pi values, unsupported expressions, duplicate
+identities, CLI strict behavior and repeatability. The library-backed tests run
 when `ISO-80000.xmi` is at the repository root or `ISO80000_XMI` points at it, and
 are skipped otherwise.
 

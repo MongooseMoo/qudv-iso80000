@@ -97,7 +97,9 @@ def converted():
 @needs_xmi
 def test_every_family_is_complete(converted):
     _, families, _ = converted
-    assert len(families) >= 317
+    # Celsius is affine; it must not be fabricated by inheriting kelvin units.
+    assert len(families) == 316
+    assert 'CelsiusTemperature' not in families
     for family in families.values():
         assert family['units'], family['name']
         assert factor_value(family['units'][family['canonical']]['factor']) == 1, family['name']
@@ -150,3 +152,22 @@ def test_rendered_yaml_round_trips(converted):
     _, families, text = converted
     loaded = yaml.safe_load(text)
     assert {s['name'] for s in loaded['scalars']} == set(families)
+
+
+@needs_xmi
+def test_real_catalog_retains_affine_source_error_and_all_kinds(converted):
+    converter, _, _ = converted
+    catalog = converter.catalog()
+    assert len(catalog['resolved']['kinds']) == 325
+    assert len(catalog['resolved']['units']) == 2795
+    nodes = catalog['declarations']
+    celsius = next(n for n in nodes.values() if n['class'] == 'AffineConversionUnit')
+    offset_id = celsius['slots']['offset'][0]['ref']
+    # This is the source's erroneous value, deliberately not a silent repair.
+    assert converter.constant(converter.by_id[offset_id]).to_yaml() == '6829/25'
+    assert catalog['resolved']['numbers'][offset_id]['rational'] == '6829/25'
+    for node in nodes.values():
+        for values in node['slots'].values():
+            for value in values:
+                if 'ref' in value:
+                    assert value['ref'] in nodes
