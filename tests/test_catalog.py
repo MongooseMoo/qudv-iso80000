@@ -356,3 +356,27 @@ def test_correction_batch_is_atomic_and_cli_keeps_existing_output(tmp_path):
     assert result.returncode == 2
     assert 'correction' in result.stderr
     assert output.read_text() == 'keep this'
+
+
+def test_preferred_evidence_replaces_a_provisional_fallback(tmp_path):
+    path = model(tmp_path)
+    add_instance(path, 'length', 'SimpleQuantityKind', 'length')
+    add_instance(path, 'metre', 'SimpleUnit', 'metre', quantityKind=['length'])
+    # The lower-priority general links form a cycle. The preferred definition
+    # is independently grounded in length and must win for both kinds.
+    add_instance(path, 'preferred', 'SimpleQuantityKind', 'preferred', general=['length', 'target'])
+    add_instance(path, 'target', 'SimpleQuantityKind', 'target', general=['preferred', 'temperature'])
+    converter = conv.ISO80000Converter(str(path))
+    result = converter.catalog()
+    for identifier in ['preferred', 'target']:
+        assert result['resolved']['kinds'][identifier]['dimensions'] == {'L': 1}
+        assert converter.kinds[identifier]['units'] == ['metre']
+    assert not any(p['category'] == 'dependency_cycle' and p['id'] in {'preferred', 'target'}
+                   for p in result['diagnostics']['problems'])
+    scalar_text = conv.render(converter.convert(), converter.problems, converter.corrections)
+    tree = etree.parse(str(path))
+    tree.getroot()[:] = list(reversed(tree.getroot()[:]))
+    tree.write(str(path), encoding='utf-8')
+    reordered = conv.ISO80000Converter(str(path))
+    assert result['resolved'] == reordered.catalog()['resolved']
+    assert scalar_text == conv.render(reordered.convert(), reordered.problems, reordered.corrections)

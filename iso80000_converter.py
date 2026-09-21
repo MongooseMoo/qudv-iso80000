@@ -24,10 +24,11 @@ import re
 import sys
 from collections import defaultdict
 from fractions import Fraction
-from graphlib import CycleError, TopologicalSorter
 
 import yaml
 from lxml import etree
+
+from dependency_resolution import infer_alternatives, resolve_dependencies, unresolved_cycles
 
 XMI_NS = 'http://www.omg.org/spec/XMI/20131001'
 XMI_ID = f'{{{XMI_NS}}}id'
@@ -458,63 +459,32 @@ class ISO80000Converter:
 
     # --- dimensions -------------------------------------------------------
 
-    def topological_values(self, graph, evaluate, stage):
-        """Resolve a dependency graph, retaining independent results on cycles.
-
-        Dimension inference has alternative sources. An anchored alternative
-        can break an otherwise cyclic group; rebuild the remaining DAG after
-        resolving such anchors. Unanchored cycles stay unresolved.
-        """
-        values = {}
-        remaining = dict(graph)
+    def report_dependencies(self, graph, values, stage):
+        """Diagnose missing references and remaining cyclic components."""
         for identifier, dependencies in graph.items():
             for dependency in dependencies:
                 if dependency not in graph:
                     record = self.kinds.get(identifier, self.units.get(identifier))
                     self.problem(identifier, record['name'], 'missing_reference',
                                  f'{stage}: missing reference {dependency}')
-        while remaining:
-            sorter = TopologicalSorter({k: sorted(d for d in deps if d in remaining)
-                                        for k, deps in sorted(remaining.items())})
-            try:
-                sorter.prepare()
-            except CycleError:
-                pass  # get_ready still provides all acyclic work.
-            while sorter.is_active():
-                ready = sorted(sorter.get_ready())
-                if not ready:
-                    break
-                for identifier in ready:
-                    values[identifier] = evaluate(identifier, values)
-                    remaining.pop(identifier)
-                sorter.done(*ready)
-            if not remaining:
-                break
-            anchors = {k: value for k in sorted(remaining)
-                       if (value := evaluate(k, values)) is not None}
-            if anchors:
-                values.update(anchors)
-                for identifier in anchors:
-                    remaining.pop(identifier)
-                continue
-            # Report actual cycles separately from nodes merely downstream.
-            cycles = {k: set(d for d in deps if d in remaining) for k, deps in sorted(remaining.items())}
-            while cycles:
-                try:
-                    tuple(TopologicalSorter({k: sorted(deps) for k, deps in cycles.items()}).static_order())
-                    break
-                except CycleError as error:
-                    cycle = sorted(set(error.args[1]))
-                    names = [self.kinds.get(k, self.units.get(k))['name'] for k in cycle]
-                    for identifier in cycle:
-                        record = self.kinds.get(identifier, self.units.get(identifier))
-                        self.problem(identifier, record['name'], 'dependency_cycle',
-                                     f'{stage}: dependency cycle involving ' + ', '.join(names))
-                        cycles.pop(identifier, None)
-                    for deps in cycles.values():
-                        deps.difference_update(cycle)
-            values.update({k: None for k in remaining})
-            break
+        for cycle in unresolved_cycles(graph, values):
+            names = [self.kinds.get(k, self.units.get(k))['name'] for k in cycle]
+            for identifier in cycle:
+                record = self.kinds.get(identifier, self.units.get(identifier))
+                self.problem(identifier, record['name'], 'dependency_cycle',
+                             f'{stage}: dependency cycle involving ' + ', '.join(names))
+
+    def required_values(self, graph, evaluate, stage):
+        values = resolve_dependencies(graph, evaluate)
+        self.report_dependencies(graph, values, stage)
+        return values
+
+    def inferred_values(self, alternatives, evaluate, stage):
+        values = infer_alternatives(alternatives, evaluate)
+        # This union is only a diagnostic graph, never a scheduling graph.
+        graph = {node: {parent for rule in rules for parent in rule}
+                 for node, rules in alternatives.items()}
+        self.report_dependencies(graph, values, stage)
         return values
 
     def resolve_dimensions(self):
@@ -540,19 +510,15 @@ class ISO80000Converter:
             else:
                 alternatives = [[(k, Fraction(1))] for k in unit['kinds'] + unit['general']]
             options[identifier] = alternatives
-        graph = {k: set() if k in constants else {d for option in opts for d, _ in option}
+        rules = {k: [()] if k in constants else [tuple(d for d, _ in option) for option in opts]
                  for k, opts in options.items()}
 
-        def evaluate(identifier, values):
+        def evaluate(identifier, index, values):
             if identifier in constants:
                 return constants[identifier]
-            for option in options[identifier]:
-                dims = self._sum_dims((values.get(k), power) for k, power in option)
-                if dims is not None:
-                    return dims
-            return None
+            return self._sum_dims((values[k], power) for k, power in options[identifier][index])
 
-        values = self.topological_values(graph, evaluate, 'dimensions')
+        values = self.inferred_values(rules, evaluate, 'dimensions')
         self._kind_dims = {k: values[k] for k in self.kinds}
         self._unit_dims = {u: values[u] for u in self.units}
         for identifier, kind in self.kinds.items():
@@ -680,13 +646,13 @@ class ISO80000Converter:
             elif unit['reference'] is not None:
                 dependencies = [unit['reference']]
             else:
-                dependencies = unit['general']
+                dependencies = unit['general'][:1]
             graph[identifier] = set(dependencies)
-        self._unit_si = self.topological_values(graph, self._compute_si_factor, 'SI factors')
+        self._unit_si = self.required_values(graph, self._compute_si_factor, 'SI factors')
         graph = {identifier: ({unit['reference']} if unit['reference'] is not None
-                             else set(unit['general']) if unit['class'] == 'SimpleUnit' else set())
+                             else set(unit['general'][:1]) if unit['class'] == 'SimpleUnit' else set())
                  for identifier, unit in self.units.items()}
-        self._unit_conversions = self.topological_values(graph, self._compute_conversion, 'conversions')
+        self._unit_conversions = self.required_values(graph, self._compute_conversion, 'conversions')
 
     def unit_si_factor(self, unit_id):
         return self._unit_si.get(unit_id)
@@ -724,14 +690,15 @@ class ISO80000Converter:
         unit_parents = {u: ([unit['reference']] if unit['reference'] else []) + unit['general']
                         for u, unit in self.units.items()}
 
-        def unit_kinds(identifier, values):
+        unit_rules = {u: [()] if unit['kinds'] else [(p,) for p in unit_parents[u]]
+                      for u, unit in self.units.items()}
+
+        def unit_kinds(identifier, index, values):
             if self.units[identifier]['kinds']:
                 return self.units[identifier]['kinds']
-            return next((values[p] for p in unit_parents[identifier] if values.get(p)), None)
+            return values[unit_rules[identifier][index][0]]
 
-        assignments = self.topological_values(
-            {u: set() if unit['kinds'] else set(unit_parents[u]) for u, unit in self.units.items()},
-            unit_kinds, 'quantity-kind assignment')
+        assignments = self.inferred_values(unit_rules, unit_kinds, 'quantity-kind assignment')
         self._assigned_kinds = {}
         for unit_id, unit in sorted(self.units.items()):
             kinds = [k for k in assignments[unit_id] or [] if k in self.kinds]
@@ -742,13 +709,14 @@ class ISO80000Converter:
             for kind_id in kinds:
                 self.kinds[kind_id]['units'].append(unit_id)
 
-        def inherited(identifier, values):
-            kind = self.kinds[identifier]
-            return kind['units'] or next((values[g] for g in kind['general'] if values.get(g)), None)
+        kind_rules = {k: [()] if kind['units'] else [(g,) for g in kind['general']]
+                      for k, kind in self.kinds.items()}
 
-        borrowed = self.topological_values(
-            {k: set() if kind['units'] else set(kind['general']) for k, kind in self.kinds.items()},
-            inherited, 'unit inheritance')
+        def inherited(identifier, index, values):
+            kind = self.kinds[identifier]
+            return kind['units'] or values[kind_rules[identifier][index][0]]
+
+        borrowed = self.inferred_values(kind_rules, inherited, 'unit inheritance')
         for kind_id, units in borrowed.items():
             self.kinds[kind_id]['units'] = list(units or [])
 
@@ -810,7 +778,7 @@ class ISO80000Converter:
                     units[pretty]['symbol'] = self.units[unit_id]['symbol']
             scalars.append({
                 'name': to_pascal_case(name),
-                'dimensions': {symbol: int(power) for symbol, power in dims.items()},
+                'dimensions': {symbol: int(power) for symbol, power in sorted(dims.items())},
                 'canonical': to_pascal_case(self.units[canonical_id]['name']),
                 'units': units,
             })

@@ -131,11 +131,25 @@ integers, `n/d` strings, and `n*pi/d` strings (`DegreeAngle: pi/180`). Only
 Everything is keyed by `xmi:id`, from the class instances and two kinds of link
 instance (`A_quantityKind_measurementUnit`, `A_systemOfUnits_baseUnit`).
 
-**Resolution order**: quantity-kind assignments, inherited units, dimensions,
-SI factors and conversions use topological dependency passes. Cycles are
-reported separately from missing references; independent nodes still resolve.
-For dimension alternatives, an available definition can anchor a cyclic group.
-There is no recursion-depth limit on conversion chains.
+**Required dependencies**: SI factors and conversion chains use topological
+ordering. A missing reference or cycle leaves the affected result unresolved;
+independent nodes still resolve. Only dependencies actually used by the
+conversion belong in this graph.
+
+**Alternative evidence**: quantity-kind assignments, inherited units and
+dimensions use a dependency work queue. Rules retain their source priority.
+An available fallback is provisional: when a preferred independent definition
+resolves, it replaces the fallback and updates dependent results. A selected
+rule cannot depend on its own result, even indirectly. Preferred rules that
+would introduce such a circular proof do not displace a grounded fallback.
+Rule selection only moves toward higher priority, so inference terminates
+without a retry limit. Stable ID scheduling makes it independent of declaration
+order. Neither resolver uses recursive dependency traversal.
+
+Missing references are reported separately from cycles. After resolution,
+strongly connected components identify every member of the remaining cycles;
+nodes merely downstream are not reported as cycle members. Alternative edges
+are combined only for this final diagnostic analysis, never for scheduling.
 
 **Dimensions of a kind**: the explicit dimension-one flag; base quantity;
 entity-count flag; the kind's own `factor` products; its `general` kind; a
