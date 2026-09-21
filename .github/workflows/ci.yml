@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Python ${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.9'
+          - os: ubuntu-latest
+            python: '3.14'
+          - os: windows-latest
+            python: '3.14'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.17'
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Type check
+        run: uv run --locked pyright
+      - name: Fetch and verify the pinned OMG library
+        run: |
+          curl --fail --location --retry 3 --output ISO-80000.xmi https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+          uv run --locked python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import yaml
+
+          expected = yaml.safe_load(Path('iso80000-corrections.yml').read_text(encoding='utf-8'))['source_sha256']
+          actual = hashlib.sha256(Path('ISO-80000.xmi').read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'OMG library hash mismatch: expected {expected}, got {actual}')
+          print(f'Verified OMG library: {actual}')
+          PY
+      - name: Test fixtures and full OMG library
+        env:
+          ISO80000_XMI: ISO-80000.xmi
+        run: uv run --locked pytest -q

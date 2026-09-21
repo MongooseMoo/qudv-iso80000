@@ -234,11 +234,18 @@ Reported, never guessed:
 - No operation rules. A derived kind's factor product is the only statement of
   how kinds combine, and many kinds share dimensions.
 
-## Tests
+## Checks and CI
 
 ```bash
-uv run pytest
+uv sync --locked
+uv run --locked pyright
+uv run --locked pytest -q
 ```
+
+Pyright checks the converter, resolver and tests using Python 3.9 language
+compatibility. The resolver has strict checking and generic value contracts;
+the rest of the project uses standard checking. Type stubs and the checker are
+development dependencies recorded in `uv.lock`.
 
 The constant, factor, symbol and synthetic XMI catalog tests always run. The latter
 cover affine composition and interval semantics, deep chains, cycles, missing
@@ -247,6 +254,14 @@ unresolved kinds, exact decimal and pi values, unsupported expressions, duplicat
 identities, CLI strict behavior and repeatability. The library-backed tests run
 when `ISO-80000.xmi` is at the repository root or `ISO80000_XMI` points at it, and
 are skipped otherwise.
+
+[GitHub Actions](.github/workflows/ci.yml) runs Pyright and pytest on pushes and
+pull requests, with manual dispatch also available. The matrix covers Python
+3.9 and 3.14 on Linux, plus Python 3.14 on Windows. Actions and uv are pinned;
+dependencies are installed with `--locked`. Every test job downloads the OMG
+library and verifies its SHA-256 against `iso80000-corrections.yml` before
+running pytest. A failed download or hash mismatch fails the job, so CI cannot
+silently skip the library-backed tests.
 
 ## Licence
 
