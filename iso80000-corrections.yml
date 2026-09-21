@@ -327,3 +327,37 @@ changes:
   value: ZPa.s.m^3/kg
   reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
   citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
+- target: ISO-80000.package_packagedElement_ISO80000-3_Space_and_Time.package_packagedElement_Units.package_packagedElement_litre.instanceSpecification_packagedElement_litre
+  field: prefix
+  expected: 1/10
+  value: 1/1000
+  reason: The litre is one cubic decimetre, 10^-3 m^3; the source applies the deci prefix to the cubic metre, giving 10^-1 m^3. Prefixed litres chain through this unit.
+  citation: https://www.bipm.org/en/publications/si-brochure
+- target: ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Quantities.package_packagedElement_isentropic_exponent.instanceSpecification_packagedElement_isentropic_exponent
+  field: factors
+  expected:
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Quantities.package_packagedElement_pressure_per_volume_increase_at_constant_entropy.instanceSpecification_packagedElement_pressure_per_volume_increase_at_constant_entropy
+    - '-1'
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Quantities.package_packagedElement_volume_per_pressure_in_a_reference_state.instanceSpecification_packagedElement_volume_per_pressure_in_a_reference_state
+    - '1'
+  value:
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Quantities.package_packagedElement_pressure_per_volume_increase_at_constant_entropy.instanceSpecification_packagedElement_pressure_per_volume_increase_at_constant_entropy
+    - '1'
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Quantities.package_packagedElement_volume_per_pressure_in_a_reference_state.instanceSpecification_packagedElement_volume_per_pressure_in_a_reference_state
+    - '1'
+  reason: Isentropic exponent is -(V/p)(dp/dV) at constant entropy, a quantity of dimension one (source section 5-17.2); the source inverts the pressure-per-volume factor, giving L^8 M^-2 T^4.
+  citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+- target: ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Units.package_packagedElement_cubic_metre_per_pascal_ratio.instanceSpecification_packagedElement_cubic_metre_per_pascal_ratio
+  field: factors
+  expected:
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Units.package_packagedElement_cubic_metre_per_pascal.instanceSpecification_packagedElement_cubic_metre_per_pascal
+    - '1'
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Units.package_packagedElement_pascal_per_cubic_metre.instanceSpecification_packagedElement_pascal_per_cubic_metre
+    - '-1'
+  value:
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Units.package_packagedElement_cubic_metre_per_pascal.instanceSpecification_packagedElement_cubic_metre_per_pascal
+    - '1'
+  - - ISO-80000.package_packagedElement_ISO80000-5_Thermodynamics.package_packagedElement_Units.package_packagedElement_pascal_per_cubic_metre.instanceSpecification_packagedElement_pascal_per_cubic_metre
+    - '1'
+  reason: Correct the isentropic-exponent unit to the product (m^3/Pa)(Pa/m^3), dimension one, consistently with the corrected quantity definition; the source divides instead.
+  citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi

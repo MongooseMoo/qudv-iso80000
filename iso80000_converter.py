@@ -300,12 +300,13 @@ class ISO80000Converter:
                 if (not isinstance(value, list) or not all(isinstance(k, str) and k in self.kinds for k in value)
                         or len(value) != len(set(value))):
                     raise CorrectionError(f'invalid correction quantity kinds: {target}')
-            elif field == 'offset' and record.get('class') == 'AffineConversionUnit':
+            elif ((field == 'offset' and record.get('class') == 'AffineConversionUnit')
+                    or (field == 'prefix' and record.get('class') == 'PrefixedUnit')):
                 current = record[field].to_yaml()
                 try:
                     value = evaluate_constant(str(change['value']))
                 except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
-                    raise CorrectionError(f'invalid correction offset: {target}') from error
+                    raise CorrectionError(f'invalid correction {field}: {target}') from error
             elif field in {'name', 'symbol'} and target in self.units:
                 current = record[field]
                 value = change['value']

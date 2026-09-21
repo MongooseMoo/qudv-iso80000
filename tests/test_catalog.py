@@ -260,6 +260,19 @@ def test_corrections_preserve_source_and_record_provenance(tmp_path):
     assert result == converter.catalog()
 
 
+def test_prefix_correction_rescales_the_unit_without_touching_the_source_prefix(tmp_path):
+    path = model(tmp_path)
+    corrections = correction_file(tmp_path, path)
+    document = yaml.safe_load(corrections.read_text())
+    document['changes'] = [dict(target='mcelsius', field='prefix', expected='1/1000', value='1/100',
+                                reason='Fixture correction', citation='urn:test')]
+    corrections.write_text(yaml.safe_dump(document))
+    result = conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
+    assert result['resolved']['units']['mcelsius']['conversion']['scale']['rational'] == '1/100'
+    assert result['resolved']['numbers']['milli']['rational'] == '1/1000'
+    assert result['declarations']['mcelsius']['slots']['prefix'] == [{'ref': 'prefix'}]
+
+
 @pytest.mark.parametrize('field,value', [('source_sha256', 'bad'), ('expected', '99'), ('target', 'absent')])
 def test_stale_corrections_fail_closed(tmp_path, field, value):
     path = model(tmp_path)

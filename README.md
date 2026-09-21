@@ -202,7 +202,8 @@ It is pinned to the source SHA-256 and each edit includes a target XMI ID,
 model field, expected old value, replacement, reason and citation. Every edit
 is validated before any is applied. Unknown targets, duplicate target/field
 pairs, stale values and a different source hash are errors. Supported fields
-are kind/unit `factors`, unit `kinds`, affine `offset`, and unit `name`/`symbol`.
+are kind/unit `factors`, unit `kinds`, affine `offset`, prefixed-unit `prefix`
+(the numeric factor), and unit `name`/`symbol`.
 Numbers in the manifest should be quoted exact expressions, not YAML floats.
 
 The reviewed manifest corrects:
