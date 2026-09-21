@@ -98,7 +98,8 @@ def converted():
 def test_every_family_is_complete(converted):
     _, families, _ = converted
     # Celsius is affine; it must not be fabricated by inheriting kelvin units.
-    assert len(families) == 316
+    assert len(families) == 317
+    assert families['NumberOfTurnsInAWinding']['dimensions'] == {}
     assert 'CelsiusTemperature' not in families
     for family in families.values():
         assert family['units'], family['name']
@@ -171,3 +172,26 @@ def test_real_catalog_retains_affine_source_error_and_all_kinds(converted):
             for value in values:
                 if 'ref' in value:
                     assert value['ref'] in nodes
+
+
+@needs_xmi
+def test_reviewed_source_corrections_resolve_all_units():
+    converter = conv.ISO80000Converter(str(XMI), corrections_file=str(ROOT / 'iso80000-corrections.yml'))
+    catalog = converter.catalog()
+    families = {s['name']: s for s in converter.convert()}
+    assert len(families) == 317
+    assert len({u for family in families.values() for u in family['units']}) == 2774
+    assert families['KinematicViscosity']['dimensions'] == {'L': 2, 'T': -1}
+    assert 'SquareMetrePerSecond' in families['KinematicViscosity']['units']
+    assert 'PascalSecondCubicMetrePerKilogram' in families['KinematicViscosity']['units']
+    assert 'WeberPerMetre' in families['MagneticVectorPotential']['units']
+    assert 'KelvinToThePowerMinusOne' in families['LinearExpansionCoefficient']['units']
+    assert 'PascalToThePowerMinusOne' in families['Compressibility']['units']
+    assert all(u['conversion'] is not None for u in catalog['resolved']['units'].values())
+    assert all(u['quantity_kinds'] for u in catalog['resolved']['units'].values())
+    assert {p['category'] for p in catalog['diagnostics']['problems']} == {'unresolved_dimensions'}
+    assert len(catalog['diagnostics']['problems']) == 7
+    celsius_id = next(i for i, n in catalog['declarations'].items() if n['class'] == 'AffineConversionUnit')
+    assert catalog['resolved']['units'][celsius_id]['conversion']['offset']['rational'] == '5463/20'
+    original_offset = catalog['declarations'][celsius_id]['slots']['offset'][0]['ref']
+    assert catalog['resolved']['numbers'][original_offset]['rational'] == '6829/25'

@@ -24,6 +24,7 @@ import re
 import sys
 from collections import defaultdict
 from fractions import Fraction
+from graphlib import CycleError, TopologicalSorter
 
 import yaml
 from lxml import etree
@@ -50,6 +51,10 @@ UNIT_CLASSES = {'SimpleUnit', 'DerivedUnit', 'PrefixedUnit', 'LinearConversionUn
 
 class ConversionError(Exception):
     """The XMI says something this converter cannot represent."""
+
+
+class CorrectionError(ConversionError):
+    """An explicitly requested correction cannot be applied safely."""
 
 
 def to_pascal_case(s):
@@ -129,6 +134,48 @@ class Factor:
         return {'rational': str(self.rational), 'pi_exponent': self.pi_exp}
 
 
+class NumberSum:
+    """An affine offset: a finite exact sum of rational powers of pi.
+
+    Mixed powers stay symbolic; only already-approximate inputs become floats.
+    """
+
+    def __init__(self, *terms):
+        self.terms = defaultdict(Fraction)
+        self.approximate = None
+        for term in terms:
+            if term.inexact is not None:
+                self.approximate = (self.approximate or 0.0) + term.inexact
+            else:
+                self.terms[term.pi_exp] += term.rational
+
+    def factors(self):
+        return [Factor(value, power) for power, value in sorted(self.terms.items()) if value]
+
+    def as_float(self):
+        return sum(f.as_float() for f in self.factors()) + (self.approximate or 0.0)
+
+    def __add__(self, other):
+        if self.approximate is not None or other.approximate is not None:
+            return NumberSum(Factor.from_float(self.as_float() + other.as_float()))
+        return NumberSum(*self.factors(), *other.factors())
+
+    def __mul__(self, scale):
+        if self.approximate is not None or scale.inexact is not None:
+            return NumberSum(Factor.from_float(self.as_float() * scale.as_float()))
+        return NumberSum(*(term * scale for term in self.factors()))
+
+    def exact_record(self):
+        if self.approximate is not None:
+            return {'approximate': self.as_float()}
+        terms = self.factors()
+        if not terms:
+            return Factor(Fraction(0)).exact_record()
+        if len(terms) == 1:
+            return terms[0].exact_record()
+        return {'sum': [term.exact_record() for term in terms]}
+
+
 def evaluate_constant(expr):
     """Evaluate a QUDV literal body such as '10^3', '(2^10)^2', 'Pi/180', 'ln(10)'."""
     source = expr.replace('^', '**')
@@ -163,7 +210,7 @@ def evaluate_constant(expr):
 
 
 class ISO80000Converter:
-    def __init__(self, xmi_file):
+    def __init__(self, xmi_file, corrections_file=None):
         print(f'Loading {xmi_file}...', file=sys.stderr)
         with open(xmi_file, 'rb') as handle:
             source = handle.read()
@@ -190,7 +237,87 @@ class ISO80000Converter:
         self._kind_dims = {}
         self._unit_dims = {}
         self._unit_si = {}
+        self._unit_conversions = {}
         self._scalars = None
+        self._diagnostics = []
+        self.applied_corrections = None
+        self.correction_manifest = None
+        if corrections_file is not None:
+            with open(corrections_file, 'rb') as handle:
+                correction_bytes = handle.read()
+            try:
+                manifest = yaml.safe_load(correction_bytes)
+            except yaml.YAMLError as error:
+                raise CorrectionError(f'invalid corrections YAML: {error}') from error
+            if (not isinstance(manifest, dict) or manifest.get('schema_version') != 1
+                    or manifest.get('source_sha256') != self.source_hash
+                    or not isinstance(manifest.get('changes'), list)):
+                raise CorrectionError('corrections require schema 1, matching source_sha256 and changes')
+            self.correction_manifest = manifest
+            self.correction_hash = hashlib.sha256(correction_bytes).hexdigest()
+
+    def problem(self, identifier, subject, category, reason):
+        item = {'id': identifier, 'subject': subject, 'category': category, 'reason': reason}
+        if item not in self._diagnostics:
+            self._diagnostics.append(item)
+            self.problems.append((subject, reason))
+
+    def apply_corrections(self):
+        """Validate every edit before changing the derived model, never the XML."""
+        if self.correction_manifest is None:
+            return
+        pending = []
+        seen = set()
+        for change in self.correction_manifest['changes']:
+            if (not isinstance(change, dict)
+                    or set(change) != {'target', 'field', 'expected', 'value', 'reason', 'citation'}
+                    or not all(isinstance(change[k], str) and change[k].strip()
+                               for k in ('target', 'field', 'reason', 'citation'))):
+                raise CorrectionError('correction requires target, field, expected, value, reason and citation')
+            target, field = change['target'], change['field']
+            record = self.units.get(target, self.kinds.get(target))
+            if record is None or (target, field) in seen:
+                raise CorrectionError(f'correction has missing or duplicate target/field: {target}.{field}')
+            seen.add((target, field))
+            if field == 'factors':
+                if target in self.units and record['class'] != 'DerivedUnit':
+                    raise CorrectionError(f'correction factors require a derived unit: {target}')
+                current = [[ref, str(power)] for ref, power in record[field]]
+                targets = self.units if target in self.units else self.kinds
+                try:
+                    value = [(ref, Fraction(power)) for ref, power in change['value']]
+                    if not value or any(ref not in targets for ref, _ in value):
+                        raise ValueError('factor target is missing')
+                except (TypeError, ValueError, ZeroDivisionError) as error:
+                    raise CorrectionError(f'invalid correction factors: {target}') from error
+            elif field == 'kinds' and target in self.units:
+                current = record[field]
+                value = change['value']
+                if (not isinstance(value, list) or not all(isinstance(k, str) and k in self.kinds for k in value)
+                        or len(value) != len(set(value))):
+                    raise CorrectionError(f'invalid correction quantity kinds: {target}')
+            elif field == 'offset' and record.get('class') == 'AffineConversionUnit':
+                current = record[field].to_yaml()
+                try:
+                    value = evaluate_constant(str(change['value']))
+                except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
+                    raise CorrectionError(f'invalid correction offset: {target}') from error
+            elif field in {'name', 'symbol'} and target in self.units:
+                current = record[field]
+                value = change['value']
+                if not isinstance(value, str) or not value.strip():
+                    raise CorrectionError(f'invalid correction {field}: {target}')
+            else:
+                raise CorrectionError(f'unsupported correction field: {target}.{field}')
+            if current != change['expected']:
+                raise CorrectionError(f'correction precondition failed: {target}.{field}')
+            pending.append((record, field, value, change))
+        for record, field, value, change in pending:
+            record[field] = value
+            self.corrections.append((record['name'],
+                                     f"{change['reason']} [{change['citation']}]; "
+                                     f"{field}: {change['expected']} -> {change['value']}"))
+        self.applied_corrections = {'sha256': self.correction_hash, **self.correction_manifest}
 
     # --- XMI access -------------------------------------------------------
 
@@ -231,6 +358,12 @@ class ISO80000Converter:
             text = inner.text if inner is not None else value_elem.text
         return (text or '').strip()
 
+    @staticmethod
+    def reference_id(elem):
+        instance = elem.find('./instance')
+        return (elem.get(XMI_ID) or elem.get(XMI_IDREF)
+                or (instance.get(XMI_IDREF) if instance is not None else None))
+
     def constant(self, elem):
         elem_id = elem.get(XMI_ID)
         if elem_id in self._const_cache:
@@ -263,11 +396,13 @@ class ISO80000Converter:
             if cls in KIND_CLASSES:
                 s = self.slots(elem)
                 flag = s.get('isQuantityOfDimensionOne')
+                count_flag = s.get('isNumberOfEntities')
                 self.kinds[elem.get(XMI_ID)] = {
                     'name': self.name_of(elem),
                     'factors': [self._factor_pair(f, 'quantityKind') for f in s.get('factor', [])],
-                    'general': [g.get(XMI_ID) for g in s.get('general', [])],
+                    'general': [self.reference_id(g) for g in s.get('general', [])],
                     'dimension_one': bool(flag) and self.literal(flag[0]).lower() == 'true',
+                    'entity_count': bool(count_flag) and self.literal(count_flag[0]).lower() == 'true',
                     'units': [],
                 }
             elif cls in UNIT_CLASSES:
@@ -276,14 +411,16 @@ class ISO80000Converter:
                     'name': self.name_of(elem),
                     'symbol': symbol_text(self.literal(s['symbol'][0])) if s.get('symbol') else '',
                     'class': cls,
-                    'kinds': [k.get(XMI_ID) for k in s.get('quantityKind', [])],
+                    'kinds': [self.reference_id(k) for k in s.get('quantityKind', [])],
                     'factors': [self._factor_pair(f, 'unit') for f in s.get('factor', [])]
                                if cls == 'DerivedUnit' else [],
-                    'scale': self.constant(s['factor'][0]) if cls == 'LinearConversionUnit' else None,
+                    'scale': self.constant(s['factor'][0])
+                             if cls in {'LinearConversionUnit', 'AffineConversionUnit'} else None,
+                    'offset': self.constant(s['offset'][0]) if cls == 'AffineConversionUnit' else None,
                     'prefix': self.constant(self.slots(s['prefix'][0])['factor'][0])
                               if cls == 'PrefixedUnit' else None,
-                    'reference': s['referenceUnit'][0].get(XMI_ID) if s.get('referenceUnit') else None,
-                    'general': [g.get(XMI_ID) for g in s.get('general', [])],
+                    'reference': self.reference_id(s['referenceUnit'][0]) if s.get('referenceUnit') else None,
+                    'general': [self.reference_id(g) for g in s.get('general', [])],
                 }
 
         for elem in self.instances:
@@ -317,82 +454,121 @@ class ISO80000Converter:
             self.corrections.append(
                 (name, f'exponent slot says {exponent}, name says {named.group(1)}; used the name'))
             exponent = Fraction(named.group(1))
-        return s[target_feature][0].get(XMI_ID), exponent
+        return self.reference_id(s[target_feature][0]), exponent
 
     # --- dimensions -------------------------------------------------------
 
-    def kind_dims(self, kind_id, _active=None):
-        """Dimensions of a quantity kind, or None when the library does not determine them.
+    def topological_values(self, graph, evaluate, stage):
+        """Resolve a dependency graph, retaining independent results on cycles.
 
-        Sources, in order: base quantity; the dimension-one flag; the kind's
-        own factors; its general kind; a derived unit that measures it. The
-        flag is the library's direct statement, so it wins over factors; where
-        the two disagree that is reported as a correction.
+        Dimension inference has alternative sources. An anchored alternative
+        can break an otherwise cyclic group; rebuild the remaining DAG after
+        resolving such anchors. Unanchored cycles stay unresolved.
         """
-        if kind_id in self._kind_dims:
-            return self._kind_dims[kind_id]
-        active = _active or set()
-        if kind_id in active:
-            return None
-        active = active | {kind_id}
-        kind = self.kinds[kind_id]
-
-        dims = None
-        if kind['name'] in DIM_MAP:
-            dims = {DIM_MAP[kind['name']]: Fraction(1)}
-        elif kind['factors']:
-            dims = self._sum_dims(
-                (self.kind_dims(k, active), e) for k, e in kind['factors'])
-        if kind['dimension_one']:
-            if dims:
-                self.corrections.append(
-                    (kind['name'], f'flagged dimension one but its factors give {_show(dims)}; used the flag'))
-            dims = {}
-        if dims is None:
-            for general_id in kind['general']:
-                dims = self.kind_dims(general_id, active)
-                if dims is not None:
+        values = {}
+        remaining = dict(graph)
+        for identifier, dependencies in graph.items():
+            for dependency in dependencies:
+                if dependency not in graph:
+                    record = self.kinds.get(identifier, self.units.get(identifier))
+                    self.problem(identifier, record['name'], 'missing_reference',
+                                 f'{stage}: missing reference {dependency}')
+        while remaining:
+            sorter = TopologicalSorter({k: sorted(d for d in deps if d in remaining)
+                                        for k, deps in sorted(remaining.items())})
+            try:
+                sorter.prepare()
+            except CycleError:
+                pass  # get_ready still provides all acyclic work.
+            while sorter.is_active():
+                ready = sorted(sorter.get_ready())
+                if not ready:
                     break
-        if dims is None:
-            for unit_id in kind['units']:
-                if self.units[unit_id]['class'] == 'DerivedUnit':
-                    dims = self.unit_dims(unit_id, active)
-                    if dims is not None:
-                        break
-
-        if _active is None or dims is not None:
-            self._kind_dims[kind_id] = dims
-        return dims
-
-    def unit_dims(self, unit_id, _active=None):
-        if unit_id in self._unit_dims:
-            return self._unit_dims[unit_id]
-        active = _active or set()
-        if unit_id in active:
-            return None
-        active = active | {unit_id}
-        unit = self.units[unit_id]
-
-        if unit['class'] == 'DerivedUnit':
-            dims = self._sum_dims((self.unit_dims(u, active), e) for u, e in unit['factors'])
-        elif unit['reference'] is not None:
-            dims = self.unit_dims(unit['reference'], active)
-        else:
-            dims = None
-            for kind_id in unit['kinds']:
-                dims = self.kind_dims(kind_id, active)
-                if dims is not None:
+                for identifier in ready:
+                    values[identifier] = evaluate(identifier, values)
+                    remaining.pop(identifier)
+                sorter.done(*ready)
+            if not remaining:
+                break
+            anchors = {k: value for k in sorted(remaining)
+                       if (value := evaluate(k, values)) is not None}
+            if anchors:
+                values.update(anchors)
+                for identifier in anchors:
+                    remaining.pop(identifier)
+                continue
+            # Report actual cycles separately from nodes merely downstream.
+            cycles = {k: set(d for d in deps if d in remaining) for k, deps in sorted(remaining.items())}
+            while cycles:
+                try:
+                    tuple(TopologicalSorter({k: sorted(deps) for k, deps in cycles.items()}).static_order())
                     break
-            if dims is None:
-                for general_id in unit['general']:
-                    if general_id in self.units:
-                        dims = self.unit_dims(general_id, active)
-                        if dims is not None:
-                            break
+                except CycleError as error:
+                    cycle = sorted(set(error.args[1]))
+                    names = [self.kinds.get(k, self.units.get(k))['name'] for k in cycle]
+                    for identifier in cycle:
+                        record = self.kinds.get(identifier, self.units.get(identifier))
+                        self.problem(identifier, record['name'], 'dependency_cycle',
+                                     f'{stage}: dependency cycle involving ' + ', '.join(names))
+                        cycles.pop(identifier, None)
+                    for deps in cycles.values():
+                        deps.difference_update(cycle)
+            values.update({k: None for k in remaining})
+            break
+        return values
 
-        if _active is None or dims is not None:
-            self._unit_dims[unit_id] = dims
-        return dims
+    def resolve_dimensions(self):
+        # Each option is a product of dependencies; copy is exponent one.
+        options, constants = {}, {}
+        for identifier, kind in self.kinds.items():
+            if kind['dimension_one']:
+                constants[identifier] = {}
+            elif kind['name'] in DIM_MAP:
+                constants[identifier] = {DIM_MAP[kind['name']]: Fraction(1)}
+            elif kind['entity_count']:
+                constants[identifier] = {}
+            alternatives = [kind['factors']] if kind['factors'] else []
+            alternatives += [[(k, Fraction(1))] for k in kind['general']]
+            alternatives += [[(u, Fraction(1))] for u in kind['units']
+                             if self.units[u]['class'] == 'DerivedUnit']
+            options[identifier] = alternatives
+        for identifier, unit in self.units.items():
+            if unit['class'] == 'DerivedUnit':
+                alternatives = [unit['factors']] if unit['factors'] else []
+            elif unit['reference'] is not None:
+                alternatives = [[(unit['reference'], Fraction(1))]]
+            else:
+                alternatives = [[(k, Fraction(1))] for k in unit['kinds'] + unit['general']]
+            options[identifier] = alternatives
+        graph = {k: set() if k in constants else {d for option in opts for d, _ in option}
+                 for k, opts in options.items()}
+
+        def evaluate(identifier, values):
+            if identifier in constants:
+                return constants[identifier]
+            for option in options[identifier]:
+                dims = self._sum_dims((values.get(k), power) for k, power in option)
+                if dims is not None:
+                    return dims
+            return None
+
+        values = self.topological_values(graph, evaluate, 'dimensions')
+        self._kind_dims = {k: values[k] for k in self.kinds}
+        self._unit_dims = {u: values[u] for u in self.units}
+        for identifier, kind in self.kinds.items():
+            factor_dims = self._sum_dims((values.get(k), e) for k, e in kind['factors'])
+            if kind['dimension_one'] and factor_dims:
+                self.corrections.append((kind['name'],
+                    f'flagged dimension one but its factors give {_show(factor_dims)}; used the flag'))
+            if kind['entity_count'] and values[identifier]:
+                self.corrections.append((kind['name'],
+                    f'entity-count flag conflicts with resolved dimensions {_show(values[identifier])}; retained dimensions'))
+
+    def kind_dims(self, kind_id):
+        return self._kind_dims.get(kind_id)
+
+    def unit_dims(self, unit_id):
+        return self._unit_dims.get(unit_id)
 
     @staticmethod
     def _sum_dims(parts):
@@ -414,7 +590,13 @@ class ISO80000Converter:
         """
         for unit_id in self.base_units:
             factor = Factor()
+            seen = set()
             while unit_id is not None:
+                if unit_id in seen:
+                    raise ConversionError('cycle in SI base-unit reference chain')
+                seen.add(unit_id)
+                if self.units[unit_id]['class'] in {'AffineConversionUnit', 'GeneralConversionUnit'}:
+                    raise ConversionError('non-multiplicative SI base-unit reference chain')
                 self._unit_si[unit_id] = factor
                 unit = self.units[unit_id]
                 own = unit['prefix'] if unit['class'] == 'PrefixedUnit' else unit['scale']
@@ -423,13 +605,10 @@ class ISO80000Converter:
                 factor = factor * own ** -1
                 unit_id = unit['reference']
 
-    def unit_si_factor(self, unit_id, _active=frozenset()):
+    def _compute_si_factor(self, unit_id, values):
         """Factor relative to the coherent SI unit of the same dimensions."""
         if unit_id in self._unit_si:
             return self._unit_si[unit_id]
-        if unit_id in _active:
-            return None
-        active = _active | {unit_id}
         unit = self.units[unit_id]
 
         result = None
@@ -441,7 +620,7 @@ class ISO80000Converter:
             if unit['factors']:
                 result = Factor()
                 for factor_unit, exponent in unit['factors']:
-                    part = self.unit_si_factor(factor_unit, active)
+                    part = values.get(factor_unit)
                     if part is None:
                         result = None
                         break
@@ -450,15 +629,88 @@ class ISO80000Converter:
             # A simple unit that is another unit under a special name (watt is
             # joule per second) takes that unit's factor. Every other simple
             # unit in the library is the coherent unit of its kind.
-            generals = [g for g in unit['general'] if g in self.units]
-            result = self.unit_si_factor(generals[0], active) if generals else Factor()
+            generals = unit['general']
+            result = values.get(generals[0]) if generals else Factor()
         elif unit['reference'] is not None:
-            reference = self.unit_si_factor(unit['reference'], active)
+            reference = values.get(unit['reference'])
             own = unit['prefix'] if unit['class'] == 'PrefixedUnit' else unit['scale']
             result = None if reference is None else own * reference
 
-        self._unit_si[unit_id] = result
+        if result is not None and (result.inexact == 0 if result.inexact is not None else result.rational == 0):
+            return None
         return result
+
+    def _compute_conversion(self, unit_id, values):
+        """Compose value_ref = scale * value + offset to a terminal unit.
+
+        Differences use scale only. Never multiply affine point units as factors.
+        A terminal unit is explicit, so equal dimensions alone do not authorize
+        conversion between different quantity kinds.
+        """
+        unit = self.units[unit_id]
+        cls = unit['class']
+        result = None
+        if cls == 'GeneralConversionUnit':
+            return None
+        if cls in {'AffineConversionUnit', 'LinearConversionUnit', 'PrefixedUnit'}:
+            parent = values.get(unit['reference'])
+            if parent is not None:
+                reference, scale, offset = parent
+                own = unit['prefix'] if cls == 'PrefixedUnit' else unit['scale']
+                own_offset = NumberSum(unit['offset']) if cls == 'AffineConversionUnit' else NumberSum()
+                if (own.inexact == 0 if own.inexact is not None else own.rational == 0):
+                    return None
+                result = (reference, scale * own, own_offset * scale + offset)
+        elif cls == 'SimpleUnit' and unit['general']:
+            parents = unit['general']
+            if parents:
+                result = values.get(parents[0])
+        elif self.unit_dims(unit_id) is not None and self.unit_si_factor(unit_id) is not None:
+            result = (unit_id, Factor(), NumberSum())
+        return result
+
+    def resolve_conversions(self):
+        self.seed_base_units()
+        graph = {}
+        for identifier, unit in self.units.items():
+            if identifier in self._unit_si or unit['class'] in {'AffineConversionUnit', 'GeneralConversionUnit'}:
+                dependencies = []
+            elif unit['class'] == 'DerivedUnit':
+                dependencies = [u for u, _ in unit['factors']]
+            elif unit['reference'] is not None:
+                dependencies = [unit['reference']]
+            else:
+                dependencies = unit['general']
+            graph[identifier] = set(dependencies)
+        self._unit_si = self.topological_values(graph, self._compute_si_factor, 'SI factors')
+        graph = {identifier: ({unit['reference']} if unit['reference'] is not None
+                             else set(unit['general']) if unit['class'] == 'SimpleUnit' else set())
+                 for identifier, unit in self.units.items()}
+        self._unit_conversions = self.topological_values(graph, self._compute_conversion, 'conversions')
+
+    def unit_si_factor(self, unit_id):
+        return self._unit_si.get(unit_id)
+
+    def unit_conversion(self, unit_id):
+        return self._unit_conversions.get(unit_id)
+
+    def unresolved_dependencies(self, kind_id):
+        """Leaf quantity kinds that prevent a dimension expression resolving."""
+        if self.kind_dims(kind_id) is not None:
+            return []
+        pending, visited, leaves = [kind_id], set(), set()
+        while pending:
+            identifier = pending.pop()
+            if identifier in visited or self.kind_dims(identifier) is not None:
+                continue
+            visited.add(identifier)
+            kind = self.kinds.get(identifier)
+            dependencies = [k for k, _ in kind['factors']] + kind['general'] if kind else []
+            if dependencies:
+                pending.extend(dependencies)
+            else:
+                leaves.add(identifier)
+        return sorted(leaves or visited)
 
     # --- assembly ---------------------------------------------------------
 
@@ -469,50 +721,53 @@ class ISO80000Converter:
         of its general unit. A kind with no unit of its own takes the units of
         its nearest general kind that has some.
         """
-        def kinds_of(unit_id, seen=frozenset()):
-            unit = self.units[unit_id]
-            if unit['kinds'] or unit_id in seen:
-                return unit['kinds']
-            for parent in ([unit['reference']] if unit['reference'] else []) + unit['general']:
-                if parent in self.units:
-                    found = kinds_of(parent, seen | {unit_id})
-                    if found:
-                        return found
-            return []
+        unit_parents = {u: ([unit['reference']] if unit['reference'] else []) + unit['general']
+                        for u, unit in self.units.items()}
 
-        for unit_id, unit in self.units.items():
-            kinds = [k for k in kinds_of(unit_id) if k in self.kinds]
+        def unit_kinds(identifier, values):
+            if self.units[identifier]['kinds']:
+                return self.units[identifier]['kinds']
+            return next((values[p] for p in unit_parents[identifier] if values.get(p)), None)
+
+        assignments = self.topological_values(
+            {u: set() if unit['kinds'] else set(unit_parents[u]) for u, unit in self.units.items()},
+            unit_kinds, 'quantity-kind assignment')
+        self._assigned_kinds = {}
+        for unit_id, unit in sorted(self.units.items()):
+            kinds = [k for k in assignments[unit_id] or [] if k in self.kinds]
+            self._assigned_kinds[unit_id] = kinds
             if not kinds:
-                self.problems.append((unit['name'], 'unit: measures no quantity kind in the library'))
+                self.problem(unit_id, unit['name'], 'missing_relationship',
+                             'unit: measures no quantity kind in the library')
             for kind_id in kinds:
                 self.kinds[kind_id]['units'].append(unit_id)
 
-        def inherited(kind_id, seen=frozenset()):
-            kind = self.kinds[kind_id]
-            if kind['units'] or kind_id in seen:
-                return kind['units']
-            for general_id in kind['general']:
-                if general_id in self.kinds:
-                    found = inherited(general_id, seen | {kind_id})
-                    if found:
-                        return found
-            return []
+        def inherited(identifier, values):
+            kind = self.kinds[identifier]
+            return kind['units'] or next((values[g] for g in kind['general'] if values.get(g)), None)
 
-        borrowed = {k: list(inherited(k)) for k, kind in self.kinds.items() if not kind['units']}
+        borrowed = self.topological_values(
+            {k: set() if kind['units'] else set(kind['general']) for k, kind in self.kinds.items()},
+            inherited, 'unit inheritance')
         for kind_id, units in borrowed.items():
-            self.kinds[kind_id]['units'] = units
+            self.kinds[kind_id]['units'] = list(units or [])
 
     def build_scalars(self):
-        self.seed_base_units()
         scalars = []
         for kind_id, kind in self.kinds.items():
             name = kind['name']
             dims = self.kind_dims(kind_id)
             if dims is None:
-                self.problems.append((name, 'kind: no factors, general kind or derived unit gives its dimensions'))
+                dependencies = self.unresolved_dependencies(kind_id)
+                names = [self.kinds[k]['name'] if k in self.kinds else k for k in dependencies]
+                self.problem(kind_id, name, 'unresolved_dimensions',
+                             'kind: dimensions depend on unresolved ' + ', '.join(names))
+                for unit_id in kind['units']:
+                    self.problem(unit_id, self.units[unit_id]['name'], 'unresolved_dimensions',
+                                 f'unit: excluded because quantity kind {name!r} has unresolved dimensions')
                 continue
             if any(power.denominator != 1 for power in dims.values()):
-                self.problems.append((name, f'kind: non-integer dimension exponents {dims}'))
+                self.problem(kind_id, name, 'scalar_format', f'kind: non-integer dimension exponents {dims}')
                 continue
 
             members = {}
@@ -520,19 +775,29 @@ class ISO80000Converter:
                 unit = self.units[unit_id]
                 unit_dims = self.unit_dims(unit_id)
                 factor = self.unit_si_factor(unit_id)
-                if factor is None:
-                    self.problems.append((unit['name'], f'unit of {name!r}: non-multiplicative conversion or unresolved factor'))
-                elif unit_dims != dims:
-                    self.problems.append((unit['name'], f'unit of {name!r}: dimensions {_show(unit_dims)} differ from kind {_show(dims)}'))
+                if unit_dims != dims:
+                    self.problem(unit_id, unit['name'], 'dimension_mismatch',
+                                 f'unit of {name!r}: dimensions {_show(unit_dims)} differ from kind {_show(dims)}')
+                elif factor is None:
+                    conversion = self.unit_conversion(unit_id)
+                    category = 'scalar_format' if conversion is not None else 'unsupported_conversion'
+                    self.problem(unit_id, unit['name'], category,
+                                 f'unit of {name!r}: non-multiplicative conversion'
+                                 if conversion is not None else f'unit of {name!r}: unresolved conversion')
                 else:
                     members[unit_id] = factor
             if not members:
-                self.problems.append((name, 'kind: no usable unit'))
+                affine_only = bool(kind['units']) and all(
+                    self.unit_conversion(u) is not None and self.unit_dims(u) == dims
+                    and self.unit_si_factor(u) is None for u in kind['units'])
+                self.problem(kind_id, name, 'scalar_format' if affine_only else 'missing_usable_unit',
+                             'kind: no usable scalar unit')
                 continue
 
             canonical_id = self._choose_canonical(members)
             if canonical_id is None:
-                self.problems.append((name, 'kind: no unit with factor exactly 1 to serve as canonical'))
+                self.problem(kind_id, name, 'scalar_format',
+                             'kind: no unit with factor exactly 1 to serve as canonical')
                 continue
 
             units = {}
@@ -574,11 +839,14 @@ class ISO80000Converter:
         if self._scalars is not None:
             return self._scalars
         self.load_model()
+        self.apply_corrections()
         self.assign_units()
+        self.resolve_dimensions()
+        self.resolve_conversions()
         scalars = self.build_scalars()
         print(f'  emitted {len(scalars)} of {len(self.kinds)} quantity kinds, '
               f"{sum(len(s['units']) for s in scalars)} unit entries; "
-              f'{len(self.problems)} problems', file=sys.stderr)
+              f'{len(self.problems)} scalar diagnostics', file=sys.stderr)
         self._scalars = scalars
         return scalars
 
@@ -657,32 +925,49 @@ class ISO80000Converter:
         # cannot interpret. Never publish a partially completed derived view.
         try:
             self.convert()
-            kinds = {identifier: {'dimensions': dimensions(self.kind_dims(identifier))}
-                     for identifier in sorted(self.kinds)}
+            kinds = {identifier: {
+                'dimensions': dimensions(self.kind_dims(identifier)),
+                'factors': [{'kind': k, 'exponent': str(e)} for k, e in self.kinds[identifier]['factors']],
+                'unresolved_dependencies': self.unresolved_dependencies(identifier),
+            } for identifier in sorted(self.kinds)}
             for identifier in sorted(self.units):
                 factor = self.unit_si_factor(identifier)
+                conversion = self.unit_conversion(identifier)
                 units[identifier] = {
+                    'name': self.units[identifier]['name'],
+                    'symbol': self.units[identifier]['symbol'],
+                    'quantity_kinds': self._assigned_kinds[identifier],
                     'dimensions': dimensions(self.unit_dims(identifier)),
                     'si_factor': None if factor is None else factor.exact_record(),
+                    'conversion': None if conversion is None else {
+                        'reference_unit': conversion[0],
+                        'scale': conversion[1].exact_record(),
+                        'offset': conversion[2].exact_record(),
+                    },
                 }
+        except CorrectionError:
+            raise
         except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
             kinds, units = {}, {}
-            self.problems.append(('derived analysis', str(error)))
+            self.problem(None, 'derived analysis', 'derived_analysis', str(error))
         numbers = {}
         for identifier, record in sorted(declarations.items()):
             if record['class'] in {'Integer', 'Real', 'Rational'}:
                 try:
                     numbers[identifier] = self.constant(self.by_id[identifier]).exact_record()
                 except (ConversionError, ValueError, ArithmeticError, SyntaxError) as error:
-                    self.problems.append((record['name'] or identifier, f'number: {error}'))
+                    self.problem(identifier, record['name'] or identifier, 'unsupported_number', f'number: {error}')
         return {
-            'schema_version': 1,
+            'schema_version': 2,
             'source': {'sha256': self.source_hash, 'format': 'OMG-QUDV-XMI'},
             'declarations': dict(sorted(declarations.items())),
             'resolved': {'kinds': kinds, 'units': units, 'numbers': numbers},
+            'applied_corrections': self.applied_corrections,
             'diagnostics': {
-                'problems': [{'subject': subject, 'reason': reason}
-                             for subject, reason in sorted(set(self.problems))],
+                'problems': sorted((p for p in self._diagnostics if p['category'] != 'scalar_format'),
+                                   key=lambda p: (p['subject'], p['reason'])),
+                'scalar_exclusions': sorted((p for p in self._diagnostics if p['category'] == 'scalar_format'),
+                                            key=lambda p: (p['subject'], p['reason'])),
                 'corrections': [{'subject': subject, 'reason': reason}
                                 for subject, reason in sorted(set(self.corrections))],
             },
@@ -698,7 +983,7 @@ def _show(dims):
 def render(scalars, problems, corrections):
     lines = [
         '# Generated from ISO-80000 XMI by iso80000_converter.py',
-        f'# {len(scalars)} quantity kinds emitted; {len(problems)} entries not emitted:',
+        f'# {len(scalars)} quantity kinds emitted; {len(problems)} scalar diagnostics (not distinct omissions):',
     ]
     lines += [f'#   {subject}: {reason}' for subject, reason in sorted(problems)]
     lines.append(f'# {len(corrections)} contradictions in the library, resolved as stated:')
@@ -712,17 +997,25 @@ def main():
     parser.add_argument('xmi', nargs='?', default='ISO-80000.xmi')
     parser.add_argument('-o', '--output', help='write YAML here instead of stdout')
     parser.add_argument('--format', choices=('scalars', 'catalog'), default='scalars',
-                        help='legacy unit families or source-preserving catalog (schema 1)')
+                        help='multiplicative unit families or source-preserving catalog (schema 2)')
+    parser.add_argument('--corrections', help='apply an attributed, source-hash-pinned correction YAML')
     parser.add_argument('--strict', action='store_true',
                         help='exit 1 on resolution gaps, even if preserved in the catalog')
     args = parser.parse_args()
 
-    converter = ISO80000Converter(args.xmi)
-    if args.format == 'catalog':
-        text = yaml.safe_dump(converter.catalog(), sort_keys=False, allow_unicode=True)
-    else:
-        scalars = converter.convert()
-        text = render(scalars, converter.problems, converter.corrections)
+    try:
+        converter = ISO80000Converter(args.xmi, corrections_file=args.corrections)
+        if args.format == 'catalog':
+            catalog = converter.catalog()
+            text = yaml.safe_dump(catalog, sort_keys=False, allow_unicode=True)
+            problems = [(p['subject'], p['reason']) for p in catalog['diagnostics']['problems']]
+        else:
+            scalars = converter.convert()
+            text = render(scalars, converter.problems, converter.corrections)
+            problems = converter.problems
+    except ConversionError as error:
+        print(f'conversion failed: {error}', file=sys.stderr)
+        return 2
     if args.output:
         with open(args.output, 'w', encoding='utf-8', newline='\n') as handle:
             handle.write(text)
@@ -730,10 +1023,10 @@ def main():
         sys.stdout.buffer.write(text.encode('utf-8'))
     for subject, what in sorted(set(converter.corrections)):
         print(f'  corrected: {subject}: {what}', file=sys.stderr)
-    for subject, reason in sorted(converter.problems):
+    for subject, reason in sorted(problems):
         label = 'unresolved in derived view' if args.format == 'catalog' else 'not emitted'
         print(f'  {label}: {subject}: {reason}', file=sys.stderr)
-    return 1 if args.strict and converter.problems else 0
+    return 1 if args.strict and problems else 0
 
 
 if __name__ == '__main__':

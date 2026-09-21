@@ -18,16 +18,19 @@ curl -L -o ISO-80000.xmi http://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
 ```bash
 uv run python iso80000_converter.py ISO-80000.xmi -o iso80000.yml
 uv run python iso80000_converter.py ISO-80000.xmi --format catalog -o catalog.yml
-uv run python iso80000_converter.py ISO-80000.xmi --strict   # exit 1 if anything was not emitted
+uv run python iso80000_converter.py ISO-80000.xmi --format catalog --corrections iso80000-corrections.yml -o corrected-catalog.yml
+uv run python iso80000_converter.py ISO-80000.xmi --corrections iso80000-corrections.yml -o corrected-scalars.yml
+uv run python iso80000_converter.py ISO-80000.xmi --strict
 ```
 
-Without `-o` the YAML goes to stdout. Progress, corrections and everything that
-was not resolved into scalar families go to stderr. Diagnostics are repeated in
-the scalar YAML header or in structured catalog fields. `--strict` exits 1 for
-these resolution gaps in either format, after writing the output; a catalog
-can preserve declarations even when its derived analysis is incomplete.
+Without `-o` the YAML goes to stdout. Progress, applied corrections and problems
+go to stderr. `--strict` exits 1 after writing output if the selected format has
+gaps. Supported affine units are scalar exclusions, not catalog problems, so
+they do not fail catalog strict mode. The seven unresolved generalized kinds
+still fail strict mode in both formats. Invalid corrections exit 2 before any
+output file is written. Diagnostic counts are not counts of distinct omissions.
 
-## Source-preserving catalog (schema version 1)
+## Source-preserving catalog (schema version 2)
 
 The catalog is an intermediate source graph, not an executable Physica model.
 It has these sections:
@@ -41,18 +44,44 @@ It has these sections:
 - Slot values are `{ref: source_id}`, `{href: external_uri}`, typed literal
   text, or an opaque XML tree. Numeric specifications retain their original
   body/language tree. Expressions are data; arbitrary source code is never run.
-- `resolved`: separately derived kind dimensions, multiplicative SI unit
-  factors, and numbers. Exact numbers use `rational` and `pi_exponent`;
+- `resolved`: separately derived kind dimensions, factor expressions and
+  unresolved dependency IDs; unit names, symbols, quantity-kind relationships,
+  multiplicative SI factors and conversions; and source numbers.
+  Exact numbers use `rational` and `pi_exponent`;
   approximate numbers use only `approximate`. Missing dimensions/factors are
   `null`, never a fabricated dimension-one value or identity conversion.
-- `diagnostics`: structured `problems` and `corrections`. Corrections made by
-  the existing inference rules affect the derived view, never source slots.
+- `diagnostics`: `problems` and `scalar_exclusions` carry source IDs, categories,
+  subjects and reasons. Categories distinguish missing relationships/references,
+  cycles, unresolved dimensions, dimensional mismatches and unsupported
+  conversions. `corrections` records inference decisions.
+- `applied_corrections`: the full explicitly selected correction manifest and
+  its SHA-256, or `null`. Changes affect the derived view, never source slots.
 
-Affine and general conversions retain their factor/offset/reference or
-expression/language slots. They have no multiplicative `si_factor`, including
-when reached through a prefix or reference chain. A consumer must interpret
-the declared conversion semantics; this exporter does not evaluate nonlinear
-conversions. Unsupported numeric expressions remain in declarations and are
+Affine conversions are resolved and composed through affine, linear, prefix
+and unit-alias chains. Each resolved unit's `conversion` contains an explicit
+terminal `reference_unit` ID, `scale` and `offset`:
+
+```text
+absolute value: reference_value = scale * value + offset
+difference:     reference_difference = scale * difference
+```
+
+These factors target the named reference unit, which is not necessarily the SI
+unit (a mass chain can terminate at gram). `si_factor` remains the separate
+multiplicative SI factor. For corrected Celsius the reference is kelvin, scale
+is `1` and offset is `5463/20`. For milli-Celsius the scale is `1/1000` and the
+offset is unchanged. Zero-scale conversions are unresolved. Mixed exact offset
+terms use `sum: [{rational: ..., pi_exponent: ...}, ...]`, preserving rational
+plus pi expressions without rounding.
+
+Affine point units have no multiplicative `si_factor`, even when reached through
+a prefix or reference chain or used in a derived product. Differences use the
+conversion scale; the exporter does not invent separate interval quantity kinds
+or authorize conversions solely from matching dimensions.
+
+General nonlinear conversions retain expression/language slots with a null
+`conversion`; the exporter does not evaluate them.
+Unsupported numeric expressions remain in declarations and are
 reported. If one prevents derived unit analysis, that derived view is empty
 rather than partially published; independently resolvable numbers remain.
 
@@ -64,8 +93,12 @@ same source and exporter. The source SHA-256 identifies bytes, not correctness.
 
 ## What it emits
 
-Against the 2015-07-09 library: **316 of 325 quantity kinds**, 7490 unit entries
-in scalar format; the catalog retains all **325 kinds and 2795 units**.
+Against the 2015-07-09 library, scalar output contains **317 of 325 quantity
+kinds**: 7491 memberships without corrections, or **7680 memberships and 2774
+distinct units** with `iso80000-corrections.yml`. The corrected catalog retains
+all **325 kinds and 2795 units**, with conversions resolved for every unit.
+The remaining 21 units are affine Celsius units; the remaining seven unresolved
+kind dimensions depend on generalized coordinate.
 Unit entries count memberships in families, not distinct units.
 Every emitted family has resolved dimensions, at least one unit, and a canonical
 unit whose factor is exactly 1. Nothing is emitted with `dimensions: {}` as a
@@ -98,9 +131,18 @@ integers, `n/d` strings, and `n*pi/d` strings (`DegreeAngle: pi/180`). Only
 Everything is keyed by `xmi:id`, from the class instances and two kinds of link
 instance (`A_quantityKind_measurementUnit`, `A_systemOfUnits_baseUnit`).
 
-**Dimensions of a kind**, first source that answers: base quantity; the
-`isQuantityOfDimensionOne` flag; the kind's own `factor` products; its `general`
-kind; a `DerivedUnit` that measures it.
+**Resolution order**: quantity-kind assignments, inherited units, dimensions,
+SI factors and conversions use topological dependency passes. Cycles are
+reported separately from missing references; independent nodes still resolve.
+For dimension alternatives, an available definition can anchor a cyclic group.
+There is no recursion-depth limit on conversion chains.
+
+**Dimensions of a kind**: the explicit dimension-one flag; base quantity;
+entity-count flag; the kind's own `factor` products; its `general` kind; a
+`DerivedUnit` that measures it. The count flag resolves winding counts. It is
+also set on amount of substance in this source: its established base dimension
+is retained and the contradiction reported. This follows the distinction
+between counts and amount of substance, not a winding-specific rule.
 
 **Units of a kind**: a unit lists zero or more kinds in its `quantityKind` slot
 and through measurement-unit links (newton measures both force and weight). A
@@ -135,22 +177,44 @@ lists it under "contradictions" in the output header:
 The library's Celsius affine unit refers to the offset **273.16**, whereas the
 [BIPM SI Brochure](https://www.bipm.org/en/publications/si-brochure) specifies
 273.15. The catalog preserves the source value (exactly `6829/25`); it does not
-silently repair it. An attributed correction is needed before using this
-definition for physical conversion. No Celsius-specific correction is embedded
-in the exporter. The prior exporter skipped the affine unit and incorrectly
-borrowed kelvin-scaled units for `CelsiusTemperature`; that family is now
-excluded from scalar output. Regression tests preserve this distinction.
+silently repair it. Selecting `iso80000-corrections.yml` applies the attributed
+273.15 offset to derived conversions while retaining the original constant.
+Celsius remains excluded from multiplicative scalar output.
+
+## Reviewed source corrections
+
+`iso80000-corrections.yml` is data, explicitly selected with `--corrections`.
+It is pinned to the source SHA-256 and each edit includes a target XMI ID,
+model field, expected old value, replacement, reason and citation. Every edit
+is validated before any is applied. Unknown targets, duplicate target/field
+pairs, stale values and a different source hash are errors. Supported fields
+are kind/unit `factors`, unit `kinds`, affine `offset`, and unit `name`/`symbol`.
+Numbers in the manifest should be quoted exact expressions, not YAML floats.
+
+The reviewed manifest corrects:
+
+- Celsius offset, following the BIPM SI Brochure.
+- Weber per metre's length exponent, following the source name and Wb/m symbol.
+- Missing reciprocal-kelvin, reciprocal-pascal and square-metre-per-second
+  quantity relationships, explicitly enumerated rather than inferred by dimension.
+- Kinematic viscosity's density exponent and the corresponding derived unit.
+  The source multiplies viscosity by density; it should divide. The affected
+  unit and prefixes also receive corrected names and symbols. See
+  [NIST's viscosity definition](https://www.nist.gov/programs-projects/gas-properties-flow-metering)
+  and [SI units for viscosity](https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8).
+
+Original names, relationships, factor declarations and constants stay in
+`declarations`; consumers of corrected data use `resolved` and the correction
+manifest together. The exporter contains no name-specific correction code.
 
 ## What the library does not contain
 
 Reported, never guessed:
 
-- Seven `generalized *` kinds and `number of turns in a winding` have no factors,
-  no general kind and no derived unit, so no dimensions.
-- `weber per metre` is modelled as weber x metre; it disagrees with magnetic vector
-  potential and is left out of that family.
-- `kelvin to the power minus one`, `pascal to the power minus one`,
-  and `square metre per second` name no kind (nor do their prefixes).
+- Generalized coordinate has no dimension definition. Six other generalized
+  kinds do have factors, but depend on that undefined coordinate. Their factor
+  expressions and unresolved dependency IDs are emitted instead of assigning
+  arbitrary dimensions or units.
 - No prefixed seconds (there is no millisecond), and no non-SI units beyond the
   few ISO 80000 accepts (minute, hour, day, tonne, degree, gon, byte, bel).
 - No operation rules. A derived kind's factor product is the only statement of
@@ -163,7 +227,8 @@ uv run pytest
 ```
 
 The constant, factor, symbol and synthetic XMI catalog tests always run. The latter
-cover affine/general definitions, prefix reference chains, source preservation,
+cover affine composition and interval semantics, deep chains, cycles, missing
+references, declaration ordering, correction preconditions, source preservation,
 unresolved kinds, exact decimal and pi values, unsupported expressions, duplicate
 identities, CLI strict behavior and repeatability. The library-backed tests run
 when `ISO-80000.xmi` is at the repository root or `ISO80000_XMI` points at it, and
