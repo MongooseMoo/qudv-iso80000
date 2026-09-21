@@ -2,19 +2,24 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Metadata edits must not displace active or pending substantive checks.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && '-metadata' || '' }}
   cancel-in-progress: true
 
 jobs:
   checks:
-    name: Pyright and tests
+    # Skipped metadata checks must not replace the ordinary required check.
+    name: Pyright and tests${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && ' (metadata edit)' || '' }}
+    if: github.event.action != 'edited' || github.event.changes.base.ref.from != null
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -22,18 +27,24 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: '0.12.17'
           python-version: '3.14'
           enable-cache: true
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Audit GitHub Actions security
+        run: uvx --from zizmor==1.29.0 zizmor --offline --strict-collection .github
       - name: Install locked dependencies
         run: uv sync --locked
       - name: Type check
         run: uv run --locked pyright
       - name: Fetch and verify the pinned OMG library
         run: |
-          curl --fail --location --retry 3 --output ISO-80000.xmi https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+          curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --retry 3 --retry-max-time 300 --output ISO-80000.xmi https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
           uv run --locked python - <<'PY'
           import hashlib
           from pathlib import Path

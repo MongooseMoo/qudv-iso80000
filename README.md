@@ -255,13 +255,30 @@ identities, CLI strict behavior and repeatability. The library-backed tests run
 when `ISO-80000.xmi` is at the repository root or `ISO80000_XMI` points at it, and
 are skipped otherwise.
 
-[GitHub Actions](.github/workflows/ci.yml) runs Pyright and pytest on pushes and
-pull requests, with manual dispatch also available. One Ubuntu job uses
+[GitHub Actions](.github/workflows/ci.yml) runs actionlint, zizmor, Pyright and
+pytest on pushes to main and pull requests, with manual dispatch also available.
+Base-branch edits trigger fresh checks; title and description edits skip the job
+with separate concurrency and check names so they cannot displace real results.
+One Ubuntu job uses
 Python 3.14 and uv; there is no version or OS matrix. Actions and uv are pinned;
 dependencies are installed with `--locked`. The job downloads the OMG
 library and verifies its SHA-256 against `iso80000-corrections.yml` before
 running pytest. A failed download or hash mismatch fails the job, so CI cannot
 silently skip the library-backed tests.
+
+Workflow checks can also run locally (actionlint requires Go):
+
+```bash
+go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+uvx --from zizmor==1.29.0 zizmor --offline --strict-collection .github
+```
+
+Zizmor runs offline without GitHub credentials; online audits are not included.
+Dependabot groups action updates into one monthly PR with a seven-day cooldown.
+The uv, actionlint and
+zizmor command versions are explicit pins and should be reviewed when updating
+the workflow tooling. Superseded checks are cancelled; the job has a 15-minute
+timeout. Checkout does not retain Git credentials.
 
 ## Licence
 
