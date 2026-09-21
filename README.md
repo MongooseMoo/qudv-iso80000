@@ -256,9 +256,9 @@ when `ISO-80000.xmi` is at the repository root or `ISO80000_XMI` points at it, a
 are skipped otherwise.
 
 [GitHub Actions](.github/workflows/ci.yml) runs Pyright and pytest on pushes and
-pull requests, with manual dispatch also available. The matrix covers Python
-3.9 and 3.14 on Linux, plus Python 3.14 on Windows. Actions and uv are pinned;
-dependencies are installed with `--locked`. Every test job downloads the OMG
+pull requests, with manual dispatch also available. One Ubuntu job uses
+Python 3.14 and uv; there is no version or OS matrix. Actions and uv are pinned;
+dependencies are installed with `--locked`. The job downloads the OMG
 library and verifies its SHA-256 against `iso80000-corrections.yml` before
 running pytest. A failed download or hash mismatch fails the job, so CI cannot
 silently skip the library-backed tests.
