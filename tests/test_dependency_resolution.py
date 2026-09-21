@@ -76,7 +76,7 @@ def test_unanchored_inference_cycle_and_missing_rule_stay_unresolved():
 
 
 def test_deep_inference_does_not_use_recursion():
-    rules = {'n0': [()]}
+    rules: dict[str, list[tuple[str, ...]]] = {'n0': [()]}
     rules.update({f'n{i}': [(f'n{i - 1}',)] for i in range(1, 2500)})
 
     def evaluate(node, index, values):

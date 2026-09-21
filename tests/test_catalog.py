@@ -138,8 +138,11 @@ def test_source_slot_text_and_duplicate_features(tmp_path):
     tree = etree.parse(str(path))
     node = next(n for n in tree.getroot() if n.get(conv.XMI_ID) == 'general')
     expression = next(s for s in node.findall('slot')
-                      if s.find('definingFeature').get('href').endswith('.expression'))
-    expression.find('value').set('value', '  opaque expression\n')
+                      if (feature := s.find('definingFeature')) is not None
+                      and feature.get('href', '').endswith('.expression'))
+    value = expression.find('value')
+    assert value is not None
+    value.set('value', '  opaque expression\n')
     tree.write(str(path), encoding='utf-8')
     result = conv.ISO80000Converter(str(path)).catalog()
     assert result['declarations']['general']['slots']['expression'][0]['value'] == '  opaque expression\n'
@@ -154,7 +157,9 @@ def test_uninterpretable_used_constant_does_not_block_source_export(tmp_path):
     path = model(tmp_path)
     tree = etree.parse(str(path))
     node = next(n for n in tree.getroot() if n.get(conv.XMI_ID) == 'milli')
-    node.find('specification/body').text = 'Real(sin(1))'
+    body = node.find('specification/body')
+    assert body is not None
+    body.text = 'Real(sin(1))'
     tree.write(str(path), encoding='utf-8')
     result = conv.ISO80000Converter(str(path)).catalog()
     assert 'prefix' in result['declarations']

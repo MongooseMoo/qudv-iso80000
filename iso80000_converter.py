@@ -188,7 +188,10 @@ def evaluate_constant(expr):
         if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
             return Factor(Fraction(node.value))
         if isinstance(node, ast.Constant) and isinstance(node.value, float):
-            return Factor(Fraction(ast.get_source_segment(source, node)))
+            literal = ast.get_source_segment(source, node)
+            if literal is None:
+                raise ConversionError(f'missing source text for numeric literal in {expr!r}')
+            return Factor(Fraction(literal))
         if isinstance(node, ast.Name) and node.id == 'Pi':
             return Factor(pi_exp=1)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
@@ -461,16 +464,17 @@ class ISO80000Converter:
 
     def report_dependencies(self, graph, values, stage):
         """Diagnose missing references and remaining cyclic components."""
+        records = {**self.kinds, **self.units}
         for identifier, dependencies in graph.items():
             for dependency in dependencies:
                 if dependency not in graph:
-                    record = self.kinds.get(identifier, self.units.get(identifier))
+                    record = records[identifier]
                     self.problem(identifier, record['name'], 'missing_reference',
                                  f'{stage}: missing reference {dependency}')
         for cycle in unresolved_cycles(graph, values):
-            names = [self.kinds.get(k, self.units.get(k))['name'] for k in cycle]
+            names = [records[k]['name'] for k in cycle]
             for identifier in cycle:
-                record = self.kinds.get(identifier, self.units.get(identifier))
+                record = records[identifier]
                 self.problem(identifier, record['name'], 'dependency_cycle',
                              f'{stage}: dependency cycle involving ' + ', '.join(names))
 

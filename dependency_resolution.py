@@ -6,10 +6,19 @@ None means unresolved; falsey values such as dimension one ({}) are facts.
 """
 
 from collections import defaultdict, deque
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from graphlib import CycleError, TopologicalSorter
+from typing import Optional, TypeVar
+
+Value = TypeVar('Value')
+Dependencies = Mapping[str, Iterable[str]]
+Alternatives = Mapping[str, Sequence[Sequence[str]]]
 
 
-def resolve_dependencies(dependencies, evaluate):
+def resolve_dependencies(
+    dependencies: Dependencies,
+    evaluate: Callable[[str, Mapping[str, Optional[Value]]], Optional[Value]],
+) -> dict[str, Optional[Value]]:
     """Evaluate the acyclic portion of a graph of required dependencies.
 
     Missing dependencies and nodes blocked by cycles remain None. Evaluators
@@ -21,7 +30,7 @@ def resolve_dependencies(dependencies, evaluate):
         sorter.prepare()
     except CycleError:
         pass  # Python still exposes the independent acyclic portion.
-    values = {}
+    values: dict[str, Optional[Value]] = {}
     while sorter.is_active():
         ready = sorted(sorter.get_ready())
         if not ready:
@@ -32,7 +41,10 @@ def resolve_dependencies(dependencies, evaluate):
     return {node: values.get(node) for node in dependencies}
 
 
-def infer_alternatives(alternatives, evaluate):
+def infer_alternatives(
+    alternatives: Alternatives,
+    evaluate: Callable[[str, int, Mapping[str, Value]], Value],
+) -> dict[str, Optional[Value]]:
     """Infer facts from ordered alternative rules using a dependency work queue.
 
     Each rule is a sequence of required input IDs. An empty sequence is a
@@ -45,24 +57,26 @@ def infer_alternatives(alternatives, evaluate):
     higher priority; fixed proofs propagate along a DAG. Both operations are
     finite, without a retry limit or recursive calls.
     """
-    subscribers = defaultdict(set)
+    subscribers: defaultdict[str, set[str]] = defaultdict(set)
     for node, rules in alternatives.items():
         for parents in rules:
             for parent in parents:
                 subscribers[parent].add(node)
 
-    values, selected = {}, {}
+    values: dict[str, Value] = {}
+    selected: dict[str, int] = {}
     queue = deque(sorted(alternatives))
     queued = set(queue)
 
-    def enqueue(nodes):
+    def enqueue(nodes: Iterable[str]) -> None:
         for node in sorted(nodes):
             if node not in queued:
                 queue.append(node)
                 queued.add(node)
 
-    def would_cycle(node, parents):
-        pending, visited = list(parents), set()
+    def would_cycle(node: str, parents: Sequence[str]) -> bool:
+        pending = list(parents)
+        visited: set[str] = set()
         while pending:
             parent = pending.pop()
             if parent == node:
@@ -104,7 +118,7 @@ def infer_alternatives(alternatives, evaluate):
     return {node: values.get(node) for node in alternatives}
 
 
-def unresolved_cycles(dependencies, values):
+def unresolved_cycles(dependencies: Dependencies, values: Mapping[str, object]) -> list[list[str]]:
     """Return every cyclic component of the unresolved graph, deterministically.
 
     Two iterative DFS passes (Kosaraju) distinguish cycle members from nodes
@@ -113,27 +127,30 @@ def unresolved_cycles(dependencies, values):
     pending = {node for node in dependencies if values.get(node) is None}
     graph = {node: sorted(parent for parent in dependencies[node] if parent in pending)
              for node in sorted(pending)}
-    visited, finished = set(), []
+    visited: set[str] = set()
+    finished: list[str] = []
     for root in graph:
-        stack = [(root, False)]
-        while stack:
-            node, leaving = stack.pop()
+        walk = [(root, False)]
+        while walk:
+            node, leaving = walk.pop()
             if leaving:
                 finished.append(node)
             elif node not in visited:
                 visited.add(node)
-                stack.append((node, True))
-                stack.extend((parent, False) for parent in reversed(graph[node]))
+                walk.append((node, True))
+                walk.extend((parent, False) for parent in reversed(graph[node]))
 
-    reverse = defaultdict(list)
+    reverse: defaultdict[str, list[str]] = defaultdict(list)
     for node, parents in graph.items():
         for parent in parents:
             reverse[parent].append(node)
-    visited, components = set(), []
+    visited = set()
+    components: list[list[str]] = []
     for root in reversed(finished):
         if root in visited:
             continue
-        component, stack = [], [root]
+        component: list[str] = []
+        stack = [root]
         visited.add(root)
         while stack:
             node = stack.pop()

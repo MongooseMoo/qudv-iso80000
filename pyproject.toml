@@ -11,7 +11,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=8",
+    "types-lxml>=2026.2.16",
+    "types-pyyaml>=6.0.12.20250915",
+]
 
 [tool.uv]
 package = false
@@ -19,3 +24,10 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.pyright]
+include = ["iso80000_converter.py", "dependency_resolution.py", "tests"]
+pythonVersion = "3.9"
+typeCheckingMode = "standard"
+strict = ["dependency_resolution.py"]
+reportUnnecessaryTypeIgnoreComment = "error"
