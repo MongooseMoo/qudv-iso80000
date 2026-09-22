@@ -22,17 +22,6 @@ import iso80000_converter as conv  # noqa: E402
 XMI = Path(os.environ.get('ISO80000_XMI', ROOT / 'ISO-80000.xmi'))
 
 
-def factor_value(rendered):
-    """Numeric value of a rendered factor: a number, 'n/d', 'pi', 'n*pi', 'pi/d' or 'n*pi/d'."""
-    if not isinstance(rendered, str):
-        return rendered
-    head, _, denominator = rendered.partition('/')
-    value = Fraction(1, int(denominator)) if denominator else Fraction(1)
-    for term in head.split('*'):
-        value = value * math.pi if term == 'pi' else value * int(term)
-    return value
-
-
 @pytest.mark.parametrize('body, expected', [
     ('24', 24),
     ('-2', -2),
@@ -40,35 +29,26 @@ def factor_value(rendered):
     ('(2^10)^2', 1048576),
 ])
 def test_integer_constants_are_exact(body, expected):
-    factor = conv.evaluate_constant(body)
-    assert factor.inexact is None and factor.pi_exp == 0
-    assert factor.rational == expected
+    assert conv.evaluate_constant(body) == conv.Exact(Fraction(expected))
 
 
 def test_pi_constants_stay_symbolic():
-    factor = conv.evaluate_constant('Pi/180') * conv.Factor(Fraction(1, 60))
-    assert factor.to_yaml() == 'pi/10800'
-    assert factor_value(factor.to_yaml()) == pytest.approx(math.pi / 10800)
+    factor = conv.multiply(conv.evaluate_constant('Pi/180'), conv.Exact(Fraction(1, 60)))
+    assert factor == conv.Exact(Fraction(1, 10800), 1)
+    assert factor.record() == {'rational': '1/10800', 'pi_exponent': 1}
+    assert factor.as_float() == pytest.approx(math.pi / 10800)
 
 
-def test_logarithm_constant_is_float():
-    assert conv.evaluate_constant('ln(10)').to_yaml() == pytest.approx(math.log(10))
+def test_logarithm_constant_is_approximate():
+    value = conv.evaluate_constant('ln(10)')
+    assert isinstance(value, conv.Approximate)
+    assert value.value == pytest.approx(math.log(10))
 
 
-def test_unsupported_constant_is_refused():
+@pytest.mark.parametrize('body', ['__import__("os")', '1/0', '1 +', '2^Pi'])
+def test_unsupported_constant_is_refused(body):
     with pytest.raises(conv.ConversionError):
-        conv.evaluate_constant('__import__("os")')
-
-
-@pytest.mark.parametrize('factor, rendered', [
-    (conv.Factor(Fraction(1000)), 1000),
-    (conv.Factor(Fraction(1, 1000)), '1/1000'),
-    (conv.Factor(Fraction(1, 200), pi_exp=1), 'pi/200'),
-    (conv.Factor(Fraction(2), pi_exp=1), '2*pi'),
-])
-def test_factor_rendering(factor, rendered):
-    assert factor.to_yaml() == rendered
-    assert factor_value(rendered) == pytest.approx(factor.as_float())
+        conv.evaluate_constant(body)
 
 
 def test_symbol_text_flattens_html_fragments():
@@ -78,94 +58,80 @@ def test_symbol_text_flattens_html_fragments():
     assert conv.symbol_text(' kg ') == 'kg'
 
 
-def test_pascal_case_drops_punctuation():
-    assert conv.to_pascal_case('watt per metre kelvin') == 'WattPerMetreKelvin'
-    assert conv.to_pascal_case('linked flux (loop m)') == 'LinkedFluxLoopM'
-
-
 needs_xmi = pytest.mark.skipif(not XMI.exists(), reason=f'{XMI} not present')
 
 
+def by_name(catalog, section):
+    """Resolved entries keyed by unique name: a unit's corrected name, a kind's source name."""
+    names = {}
+    for identifier, entry in catalog['resolved'][section].items():
+        name = entry['name'] if section == 'units' else catalog['declarations'][identifier]['name']
+        assert name not in names, name
+        names[name] = entry
+    return names
+
+
 @pytest.fixture(scope='module')
-def converted():
+def corrected():
+    converter = conv.ISO80000Converter(str(XMI), corrections_file=str(ROOT / 'iso80000-corrections.yml'))
+    return converter, converter.catalog()
+
+
+@needs_xmi
+@pytest.mark.parametrize('unit, expected', [
+    ('kilogram', {'rational': '1', 'pi_exponent': 0}),
+    ('gram', {'rational': '1/1000', 'pi_exponent': 0}),
+    ('tonne', {'rational': '1000', 'pi_exponent': 0}),
+    ('hour', {'rational': '3600', 'pi_exponent': 0}),
+    ('day', {'rational': '86400', 'pi_exponent': 0}),
+    ('kilonewton', {'rational': '1000', 'pi_exponent': 0}),
+    ('volt', {'rational': '1', 'pi_exponent': 0}),
+    ('watt', {'rational': '1', 'pi_exponent': 0}),
+    ('henry', {'rational': '1', 'pi_exponent': 0}),
+    ('second angle', {'rational': '1/648000', 'pi_exponent': 1}),
+    ('byte', {'rational': '8', 'pi_exponent': 0}),
+    ('litre', {'rational': '1/1000', 'pi_exponent': 0}),
+])
+def test_known_si_factors(corrected, unit, expected):
+    _, catalog = corrected
+    assert by_name(catalog, 'units')[unit]['si_factor'] == expected
+
+
+@needs_xmi
+@pytest.mark.parametrize('kind, dimensions', [
+    ('voltage', {'M': 1, 'L': 2, 'T': -3, 'I': -1}),
+    ('electric field strength', {'M': 1, 'L': 1, 'T': -3, 'I': -1}),
+    ('magnetic flux', {'M': 1, 'L': 2, 'T': -2, 'I': -1}),
+    ('thermodynamic temperature', {'Θ': 1}),
+    ('amount of substance', {'N': 1}),
+    ('number of turns in a winding', {}),
+    ('initial phase of electric current', {}),
+])
+def test_known_dimensions(corrected, kind, dimensions):
+    _, catalog = corrected
+    assert by_name(catalog, 'kinds')[kind]['dimensions'] == dimensions
+
+
+@needs_xmi
+def test_library_contradictions_are_refused_unless_declared():
     converter = conv.ISO80000Converter(str(XMI))
-    scalars = converter.convert()
-    text = conv.render(scalars, converter.problems, converter.corrections)
-    return converter, {s['name']: s for s in scalars}, text
-
-
-@needs_xmi
-def test_every_family_is_complete(converted):
-    _, families, _ = converted
-    # Celsius is affine; it must not be fabricated by inheriting kelvin units.
-    assert len(families) == 317
-    assert families['NumberOfTurnsInAWinding']['dimensions'] == {}
-    assert 'CelsiusTemperature' not in families
-    for family in families.values():
-        assert family['units'], family['name']
-        assert factor_value(family['units'][family['canonical']]['factor']) == 1, family['name']
-
-
-@needs_xmi
-@pytest.mark.parametrize('family, unit, expected', [
-    ('Mass', 'Kilogram', 1),
-    ('Mass', 'Gram', Fraction(1, 1000)),
-    ('Mass', 'Tonne', 1000),
-    ('Time', 'Hour', 3600),
-    ('Time', 'Day', 86400),
-    ('Force', 'Kilonewton', 1000),
-    ('ElectricPotential', 'Volt', 1),
-    ('Power', 'Watt', 1),
-    ('Inductance', 'Henry', 1),
-    ('PlaneAngle', 'SecondAngle', math.pi / 648000),
-    ('StorageCapacity', 'Byte', 8),
-])
-def test_known_factors(converted, family, unit, expected):
-    _, families, _ = converted
-    assert factor_value(families[family]['units'][unit]['factor']) == pytest.approx(expected)
-
-
-@needs_xmi
-@pytest.mark.parametrize('family, dimensions', [
-    ('ElectricPotential', {'M': 1, 'L': 2, 'T': -3, 'I': -1}),
-    ('ElectricPower', {'M': 1, 'L': 2, 'T': -3}),
-    ('MagneticFlux', {'M': 1, 'L': 2, 'T': -2, 'I': -1}),
-    ('PlaneAngle', {}),
-    ('PhaseDifference', {}),
-])
-def test_known_dimensions(converted, family, dimensions):
-    _, families, _ = converted
-    assert families[family]['dimensions'] == dimensions
-
-
-@needs_xmi
-def test_library_contradictions_are_reported_not_hidden(converted):
-    converter, families, _ = converted
-    corrected = {subject for subject, _ in converter.corrections}
-    assert 'electric charge^-1' in corrected
-    unresolved = {subject for subject, reason in converter.problems if reason.startswith('kind:')}
-    assert 'generalized coordinate' in unresolved
-    assert 'GeneralizedCoordinate' not in families
-
-
-@needs_xmi
-def test_rendered_yaml_round_trips(converted):
-    _, families, text = converted
-    loaded = yaml.safe_load(text)
-    assert {s['name'] for s in loaded['scalars']} == set(families)
-
-
-@needs_xmi
-def test_real_catalog_retains_affine_source_error_and_all_kinds(converted):
-    converter, _, _ = converted
     catalog = converter.catalog()
-    assert len(catalog['resolved']['kinds']) == 325
-    assert len(catalog['resolved']['units']) == 2795
+    assert catalog['resolved']['kinds'] == {} and catalog['resolved']['units'] == {}
+    [problem] = catalog['diagnostics']['problems']
+    assert problem['category'] == 'derived_analysis'
+    assert problem['subject'] == 'electric charge^-1'
+    assert 'declare a correction' in problem['reason']
+
+
+@needs_xmi
+def test_real_catalog_retains_affine_source_error(corrected):
+    converter, catalog = corrected
+    assert yaml.safe_load(yaml.safe_dump(catalog, allow_unicode=True)) == catalog
     nodes = catalog['declarations']
     celsius = next(n for n in nodes.values() if n['class'] == 'AffineConversionUnit')
     offset_id = celsius['slots']['offset'][0]['ref']
     # This is the source's erroneous value, deliberately not a silent repair.
-    assert converter.constant(converter.by_id[offset_id]).to_yaml() == '6829/25'
+    assert converter.constant(offset_id) == conv.Exact(Fraction(6829, 25))
     assert catalog['resolved']['numbers'][offset_id]['rational'] == '6829/25'
     for node in nodes.values():
         for values in node['slots'].values():
@@ -175,23 +141,33 @@ def test_real_catalog_retains_affine_source_error_and_all_kinds(converted):
 
 
 @needs_xmi
-def test_reviewed_source_corrections_resolve_all_units():
-    converter = conv.ISO80000Converter(str(XMI), corrections_file=str(ROOT / 'iso80000-corrections.yml'))
-    catalog = converter.catalog()
-    families = {s['name']: s for s in converter.convert()}
-    assert len(families) == 317
-    assert len({u for family in families.values() for u in family['units']}) == 2774
-    assert families['KinematicViscosity']['dimensions'] == {'L': 2, 'T': -1}
-    assert 'SquareMetrePerSecond' in families['KinematicViscosity']['units']
-    assert 'PascalSecondCubicMetrePerKilogram' in families['KinematicViscosity']['units']
-    assert 'WeberPerMetre' in families['MagneticVectorPotential']['units']
-    assert 'KelvinToThePowerMinusOne' in families['LinearExpansionCoefficient']['units']
-    assert 'PascalToThePowerMinusOne' in families['Compressibility']['units']
-    assert all(u['conversion'] is not None for u in catalog['resolved']['units'].values())
-    assert all(u['quantity_kinds'] for u in catalog['resolved']['units'].values())
+def test_reviewed_source_corrections_resolve_all_units(corrected):
+    _, catalog = corrected
+    kinds = catalog['resolved']['kinds']
+    units = catalog['resolved']['units']
+    assert len(kinds) == 325
+    assert len(units) == 2795
+    named_kinds = {catalog['declarations'][k]['name']: k for k in kinds}
+    named_units = by_name(catalog, 'units')
+    assert kinds[named_kinds['kinematic viscosity']]['dimensions'] == {'L': 2, 'T': -1}
+    for unit, kind in [('square metre per second', 'kinematic viscosity'),
+                       ('pascal second cubic metre per kilogram', 'kinematic viscosity'),
+                       ('weber per metre', 'magnetic vector potential'),
+                       ('kelvin to the power minus one', 'linear expansion coefficient'),
+                       ('pascal to the power minus one', 'compressibility')]:
+        assert named_kinds[kind] in named_units[unit]['quantity_kinds'], unit
+    # Prefixed units follow their corrected reference unit's name and symbol.
+    kilo = named_units['kilopascal second cubic metre per kilogram']
+    assert kilo['symbol'] == 'kPa.s.m^3/kg'
+    assert named_units['micropascal second cubic metre per kilogram']['symbol'] == 'μPa.s.m^3/kg'
+    assert all(u['conversion'] is not None for u in units.values())
+    assert all(u['quantity_kinds'] for u in units.values())
+    assert all(u['symbol'] is None or u['symbol'] for u in units.values())
     assert {p['category'] for p in catalog['diagnostics']['problems']} == {'unresolved_dimensions'}
     assert len(catalog['diagnostics']['problems']) == 7
+    assert 'generalized coordinate' in {p['subject'] for p in catalog['diagnostics']['problems']}
     celsius_id = next(i for i, n in catalog['declarations'].items() if n['class'] == 'AffineConversionUnit')
-    assert catalog['resolved']['units'][celsius_id]['conversion']['offset']['rational'] == '5463/20'
+    assert units[celsius_id]['conversion']['offset']['rational'] == '5463/20'
+    assert units[celsius_id]['si_factor'] is None
     original_offset = catalog['declarations'][celsius_id]['slots']['offset'][0]['ref']
     assert catalog['resolved']['numbers'][original_offset]['rational'] == '6829/25'

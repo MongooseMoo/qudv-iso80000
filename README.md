@@ -1,10 +1,9 @@
 # qudv-iso80000
 
 `iso80000_converter.py` reads the OMG SysML QUDV model library for ISO/IEC 80000
-and writes its quantity kinds, dimensions, units, exact conversion factors and
-unit symbols as YAML. Use `--format catalog` to retain the source declarations
-and relationships; the default `scalars` format is the older multiplicative
-unit-family projection.
+and writes a source-preserving YAML catalog: every source declaration, plus a
+separately derived view of quantity kinds, dimensions, units, exact conversion
+factors and unit symbols. The catalog is the only output format.
 
 The source is the machine-readable OMG library, not the ISO documents. It is not
 checked in (92 MB). Download it once:
@@ -16,19 +15,20 @@ curl -L -o ISO-80000.xmi http://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
 ## Usage
 
 ```bash
-uv run python iso80000_converter.py ISO-80000.xmi -o iso80000.yml
-uv run python iso80000_converter.py ISO-80000.xmi --format catalog -o catalog.yml
-uv run python iso80000_converter.py ISO-80000.xmi --format catalog --corrections iso80000-corrections.yml -o corrected-catalog.yml
-uv run python iso80000_converter.py ISO-80000.xmi --corrections iso80000-corrections.yml -o corrected-scalars.yml
-uv run python iso80000_converter.py ISO-80000.xmi --strict
+uv run python iso80000_converter.py ISO-80000.xmi --corrections iso80000-corrections.yml -o catalog.yml
+uv run python iso80000_converter.py ISO-80000.xmi --corrections iso80000-corrections.yml --strict
 ```
 
 Without `-o` the YAML goes to stdout. Progress, applied corrections and problems
-go to stderr. `--strict` exits 1 after writing output if the selected format has
-gaps. Supported affine units are scalar exclusions, not catalog problems, so
-they do not fail catalog strict mode. The seven unresolved generalized kinds
-still fail strict mode in both formats. Invalid corrections exit 2 before any
-output file is written. Diagnostic counts are not counts of distinct omissions.
+go to stderr. `--strict` exits 1 after writing output if the derived view has
+gaps; the seven unresolved generalized kinds fail strict mode. Invalid
+corrections exit 2 before any output file is written.
+
+The source library contradicts itself in a few places (see below). Without the
+corrections file the derived view refuses the first undeclared contradiction:
+`resolved.kinds` and `resolved.units` are empty and one `derived_analysis`
+diagnostic names the declaration involved. Declarations and numbers are still
+written.
 
 ## Source-preserving catalog (schema version 2)
 
@@ -42,18 +42,21 @@ It has these sections:
   instances. Each has its source class/name/classifier references, `slots` and
   full defining-feature URIs in `features`. Local slot names are conveniences.
 - Slot values are `{ref: source_id}`, `{href: external_uri}`, typed literal
-  text, or an opaque XML tree. Numeric specifications retain their original
+  text, or an opaque XML tree. Each is parsed once. A reference must name an
+  instance specification in the same document; a dangling reference is an
+  error, not a literal. Numeric specifications retain their original
   body/language tree. Expressions are data; arbitrary source code is never run.
 - `resolved`: separately derived kind dimensions, factor expressions and
   unresolved dependency IDs; unit names, symbols, quantity-kind relationships,
   multiplicative SI factors and conversions; and source numbers.
   Exact numbers use `rational` and `pi_exponent`;
   approximate numbers use only `approximate`. Missing dimensions/factors are
-  `null`, never a fabricated dimension-one value or identity conversion.
-- `diagnostics`: `problems` and `scalar_exclusions` carry source IDs, categories,
-  subjects and reasons. Categories distinguish missing relationships/references,
-  cycles, unresolved dimensions, dimensional mismatches and unsupported
-  conversions. `corrections` records inference decisions.
+  `null`, never a fabricated dimension-one value or identity conversion. A unit
+  without a symbol has `symbol: null`.
+- `diagnostics.problems`: each carries the source ID, subject, category and
+  reason. Categories distinguish missing relationships/references, cycles,
+  unresolved dimensions, dimensional mismatches, unsupported conversions,
+  unsupported numbers and a refused derived analysis (`derived_analysis`).
 - `applied_corrections`: the full explicitly selected correction manifest and
   its SHA-256, or `null`. Changes affect the derived view, never source slots.
 
@@ -74,8 +77,10 @@ offset is unchanged. Zero-scale conversions are unresolved. Mixed exact offset
 terms use `sum: [{rational: ..., pi_exponent: ...}, ...]`, preserving rational
 plus pi expressions without rounding.
 
-Affine point units have no multiplicative `si_factor`, even when reached through
-a prefix or reference chain or used in a derived product. Differences use the
+`si_factor` is derived from the conversion: a unit whose composed offset is
+exactly zero has the conversion scale times its terminal unit's SI factor.
+Affine point units therefore have no multiplicative `si_factor`, even when
+reached through a prefix or reference chain or used in a derived product. Differences use the
 conversion scale; the exporter does not invent separate interval quantity kinds
 or authorize conversions solely from matching dimensions.
 
@@ -83,53 +88,33 @@ General nonlinear conversions retain expression/language slots with a null
 `conversion`; the exporter does not evaluate them.
 Unsupported numeric expressions remain in declarations and are
 reported. If one prevents derived unit analysis, that derived view is empty
-rather than partially published; independently resolvable numbers remain.
+rather than partially published, and the diagnostic names the declaration that
+failed; independently resolvable numbers remain.
 
 The catalog includes unresolved kinds, fractional dimension exponents, and
-exact powers of pi that cannot be represented by the legacy scalar format.
-Duplicate XMI IDs or colliding local slot names are rejected, not overwritten.
+exact powers of pi. Duplicate XMI IDs or colliding local slot names are
+rejected, not overwritten.
 Output has no timestamps or machine-local paths and is deterministic for the
 same source and exporter. The source SHA-256 identifies bytes, not correctness.
 
 ## What it emits
 
-Against the 2015-07-09 library, scalar output contains **317 of 325 quantity
-kinds**: 7491 memberships without corrections, or **7680 memberships and 2774
-distinct units** with `iso80000-corrections.yml`. The corrected catalog retains
-all **325 kinds and 2795 units**, with conversions resolved for every unit.
-The remaining 21 units are affine Celsius units; the remaining seven unresolved
-kind dimensions depend on generalized coordinate.
-Unit entries count memberships in families, not distinct units.
-Every emitted family has resolved dimensions, at least one unit, and a canonical
-unit whose factor is exactly 1. Nothing is emitted with `dimensions: {}` as a
-placeholder; `{}` means dimension one.
+Against the 2015-07-09 library with `iso80000-corrections.yml`, the catalog
+retains all **325 kinds and 2795 units**, with conversions resolved for every
+unit. The 21 affine Celsius units have conversions but no `si_factor`; the
+seven unresolved kind dimensions depend on generalized coordinate. Nothing is
+emitted with `dimensions: {}` as a placeholder; `{}` means dimension one.
 
-```yaml
-scalars:
-- name: Mass
-  dimensions:
-    M: 1
-  canonical: Kilogram
-  units:
-    Gram:
-      factor: 1/1000
-      symbol: g
-    Kilogram:
-      factor: 1
-      symbol: kg
-    Tonne:
-      factor: 1000
-      symbol: t
-```
-
-Dimension keys are `L M T I Θ N J`. Factors are exact where the library is exact:
-integers, `n/d` strings, and `n*pi/d` strings (`DegreeAngle: pi/180`). Only
-`ln(10)` (bel) becomes a float.
+Dimension keys are the ISO 80000-1 symbols `L M T I Θ N J`. Factors are exact
+where the library is exact, including powers of pi (the angle second is
+`{rational: 1/648000, pi_exponent: 1}`). Only `ln(10)` (bel) becomes
+approximate.
 
 ## How the library is read
 
-Everything is keyed by `xmi:id`, from the class instances and two kinds of link
-instance (`A_quantityKind_measurementUnit`, `A_systemOfUnits_baseUnit`).
+Everything is keyed by `xmi:id`, from the class instances and three kinds of
+link instance (`A_quantityKind_measurementUnit`, `A_systemOfUnits_baseUnit`,
+`A_systemOfQuantities_baseQuantityKind`).
 
 **Required dependencies**: SI factors and conversion chains use topological
 ordering. A missing reference or cycle leaves the affected result unresolved;
@@ -151,12 +136,15 @@ strongly connected components identify every member of the remaining cycles;
 nodes merely downstream are not reported as cycle members. Alternative edges
 are combined only for this final diagnostic analysis, never for scheduling.
 
-**Dimensions of a kind**: the explicit dimension-one flag; base quantity;
-entity-count flag; the kind's own `factor` products; its `general` kind; a
-`DerivedUnit` that measures it. The count flag resolves winding counts. It is
-also set on amount of substance in this source: its established base dimension
-is retained and the contradiction reported. This follows the distinction
-between counts and amount of substance, not a winding-specific rule.
+**Dimensions of a kind**: stated directly by being an ISQ base quantity, by the
+dimension-one flag or by the entity-count flag; otherwise the kind's own
+`factor` products, its `general` kind, or a `DerivedUnit` that measures it. The
+count flag resolves winding counts. Base quantities come from the library's
+base-quantity links. The library gives their quantity symbols (l, m, t, ...)
+but no dimension symbols, so the converter supplies the ISO 80000-1 symbol for
+each base quantity and refuses a base quantity it has no symbol for. Direct
+statements that disagree with each other, or with the kind's own factors, are
+refused unless a correction resolves them.
 
 **Units of a kind**: a unit lists zero or more kinds in its `quantityKind` slot
 and through measurement-unit links (newton measures both force and weight). A
@@ -164,47 +152,61 @@ unit that names no kind takes the kinds of its reference unit, then of its
 `general` unit. A kind with no unit of its own takes the units of its nearest
 `general` kind that has some.
 
-**Factors** are relative to the coherent SI unit of the same dimensions. SI base
-units are 1, so a base unit's reference is its inverse: the library makes gram the
-simple unit of mass and kilogram a prefixed unit of it, and gram comes out as
-1/1000. Prefixed and linear-conversion units multiply along their reference
-chain (day -> hour -> minute -> second). Derived units multiply their unit
-factors. A simple unit that is another unit under a special name (watt is joule
-per second) takes that unit's factor; every other simple unit in the library
-(volt, ohm, henry, tesla, weber ...) is the coherent unit of its kind.
+**Factors**: each unit's own scale (prefix factor or conversion factor) and
+offset are composed once along its reference chain (day -> hour -> minute ->
+second) into a conversion to a terminal simple or derived unit. SI factors
+follow from those conversions. SI base units are 1, which fixes their
+terminal's factor: the library makes gram the simple unit of mass and kilogram
+a prefixed unit of it, so gram comes out as 1/1000. Derived terminals multiply
+their unit factors. A simple unit that is another unit under a special name
+(watt is joule per second) takes that unit's conversion. Every other simple
+unit in the library (volt, ohm, henry, tesla, weber ...) is the coherent unit
+of its kind.
 
-A unit whose dimensions differ from the kind it claims to measure is not emitted
-under that kind.
+A unit whose dimensions differ from a kind it measures is reported as a
+`dimension_mismatch`.
 
 ## Contradictions in the library
 
-Where the library contradicts itself the converter resolves it, says how, and
-lists it under "contradictions" in the output header:
+The converter does not pick a side when the library contradicts itself. It
+refuses the derived view until a correction declares the resolution. The
+reviewed manifest declares these:
 
 - The factor instance named `electric charge^-1` has an exponent slot of `1`.
-  Every factor is named `target^exponent`; the name is used. With the slot value,
-  electric field strength, potential, flux, power and every kind built on them
-  get dimensions that disagree with their own units; with the name they agree.
+  Every factor is named `target^exponent`, and a name that disagrees with its
+  slot is refused. With the slot value, electric field strength, potential,
+  flux, power and every kind built on them get dimensions that disagree with
+  their own units. The manifest corrects electric field strength's factors.
 - `initial phase of electric current` and `initial phase of electric voltage` are
-  flagged dimension one but carry factors (current, voltage). The flag is used.
+  flagged dimension one but carry factors (current, voltage). The manifest
+  removes those factors.
+- Amount of substance is an ISQ base quantity (N) and is also flagged as a
+  number of entities (dimension one). The manifest clears the entity-count flag.
 
 The library's Celsius affine unit refers to the offset **273.16**, whereas the
 [BIPM SI Brochure](https://www.bipm.org/en/publications/si-brochure) specifies
 273.15. The catalog preserves the source value (exactly `6829/25`); it does not
 silently repair it. Selecting `iso80000-corrections.yml` applies the attributed
 273.15 offset to derived conversions while retaining the original constant.
-Celsius remains excluded from multiplicative scalar output.
 
 ## Reviewed source corrections
 
 `iso80000-corrections.yml` is data, explicitly selected with `--corrections`.
 It is pinned to the source SHA-256 and each edit includes a target XMI ID,
 model field, expected old value, replacement, reason and citation. Every edit
-is validated before any is applied. Unknown targets, duplicate target/field
-pairs, stale values and a different source hash are errors. Supported fields
-are kind/unit `factors`, unit `kinds`, affine `offset`, prefixed-unit `prefix`
-(the numeric factor), and unit `name`/`symbol`.
-Numbers in the manifest should be quoted exact expressions, not YAML floats.
+is validated before any is applied. `expected` and `value` are parsed by the
+same field rule and compared as typed values. Unknown targets, duplicate
+target/field pairs, stale values, fields that do not apply to the target's
+class and a different source hash are errors. Supported fields are kind and
+derived-unit `factors`, unit `kinds`, prefixed/linear/affine-unit `scale` (the
+unit's own factor to its reference), affine `offset`, unit `name`/`symbol` and
+kind `entity_count`. Numbers in the manifest should be quoted exact
+expressions, not YAML floats.
+
+A prefixed unit's name and symbol are its prefix's followed by its reference
+unit's. When a correction renames a reference unit, its prefixed units follow
+without their own entries, provided their source text was that same
+composition. Any other disagreement must be declared.
 
 The reviewed manifest corrects:
 
@@ -214,9 +216,12 @@ The reviewed manifest corrects:
   quantity relationships, explicitly enumerated rather than inferred by dimension.
 - Kinematic viscosity's density exponent and the corresponding derived unit.
   The source multiplies viscosity by density; it should divide. The affected
-  unit and prefixes also receive corrected names and symbols. See
+  unit receives a corrected name and symbol, which its prefixed units follow. See
   [NIST's viscosity definition](https://www.nist.gov/programs-projects/gas-properties-flow-metering)
   and [SI units for viscosity](https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8).
+- The litre's scale (deci applied to cubic metre, corrected to 10^-3), and the
+  isentropic exponent and its unit, which should be dimension one.
+- The three self-contradictions listed above.
 
 Original names, relationships, factor declarations and constants stay in
 `declarations`; consumers of corrected data use `resolved` and the correction

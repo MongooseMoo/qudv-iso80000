@@ -2,6 +2,7 @@
 import hashlib
 import subprocess
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,8 @@ def model(tmp_path):
         spec = etree.SubElement(node, 'specification')
         etree.SubElement(spec, 'body').text = 'Real(' + body + ')'
     instance('temperature', 'SimpleQuantityKind', 'thermodynamic temperature')
+    instance('isq_temperature', 'baseQuantityKind', 'ISQ base thermodynamic temperature',
+             baseQuantityKind=['temperature'])
     instance('celsius_kind', 'SimpleQuantityKind', 'Celsius temperature', general=['temperature'])
     instance('unknown', 'SimpleQuantityKind', 'unresolved quantity')
     instance('kelvin', 'SimpleUnit', 'kelvin', quantityKind=['temperature'], symbol=[('K',)])
@@ -76,20 +79,23 @@ def test_catalog_preserves_definitions_and_unresolved_nodes(tmp_path):
     assert converter.catalog() == catalog
 
 
-def test_affine_and_nonlinear_units_never_become_scalar_factors(tmp_path):
-    converter = conv.ISO80000Converter(str(model(tmp_path)))
-    scalars = converter.convert()
-    assert 'celsius' in converter.units
-    assert 'general' in converter.units
-    for family in scalars:
-        assert not {'DegreeCelsius', 'MillidegreeCelsius', 'NonlinearTemperature'} & family['units'].keys()
-    assert any('non-multiplicative' in reason for _, reason in converter.problems)
+def test_affine_and_nonlinear_units_have_no_multiplicative_factor(tmp_path):
+    result = conv.ISO80000Converter(str(model(tmp_path))).catalog()
+    units = result['resolved']['units']
+    assert units['kelvin']['si_factor'] == {'rational': '1', 'pi_exponent': 0}
+    assert units['kelvin']['symbol'] == 'K'
+    assert units['celsius']['symbol'] is None
+    for identifier in ['celsius', 'mcelsius', 'general']:
+        assert units[identifier]['si_factor'] is None
+    assert units['general']['conversion'] is None
+    assert any(p['id'] == 'general' and p['category'] == 'unsupported_conversion'
+               for p in result['diagnostics']['problems'])
 
 
 def test_catalog_cli_and_strict_diagnostics(tmp_path):
     path = model(tmp_path)
     result = subprocess.run([
-        sys.executable, str(Path(conv.__file__)), str(path), '--format', 'catalog', '--strict',
+        sys.executable, str(Path(conv.__file__)), str(path), '--strict',
     ], capture_output=True, text=True, encoding='utf-8')
     assert result.returncode == 1
     assert yaml.safe_load(result.stdout)['declarations']['celsius']['slots']['offset'] == [{'ref': 'offset'}]
@@ -103,14 +109,16 @@ def test_duplicate_ids_are_rejected(tmp_path):
 
 
 def test_decimal_literal_does_not_round_through_binary_float():
-    assert conv.evaluate_constant('0.123456789012345678901').to_yaml() == '123456789012345678901/1000000000000000000000'
+    assert conv.evaluate_constant('0.123456789012345678901').record() == {
+        'rational': '123456789012345678901/1000000000000000000000', 'pi_exponent': 0,
+    }
 
 
 def test_exact_catalog_numbers_preserve_pi_powers():
-    assert conv.evaluate_constant('(Pi/180)^2').exact_record() == {
+    assert conv.evaluate_constant('(Pi/180)^2').record() == {
         'rational': '1/32400', 'pi_exponent': 2,
     }
-    assert conv.evaluate_constant('ln(10)').exact_record() == {'approximate': pytest.approx(2.302585092994046)}
+    assert conv.evaluate_constant('ln(10)').record() == {'approximate': pytest.approx(2.302585092994046)}
 
 
 def test_catalog_preserves_unknown_number_expression(tmp_path):
@@ -164,7 +172,9 @@ def test_uninterpretable_used_constant_does_not_block_source_export(tmp_path):
     result = conv.ISO80000Converter(str(path)).catalog()
     assert 'prefix' in result['declarations']
     assert result['resolved']['units'] == {}
-    assert any(p['subject'] == 'derived analysis' for p in result['diagnostics']['problems'])
+    # The failure names the declaration whose content could not be interpreted.
+    assert any(p['category'] == 'derived_analysis' and p['id'] == 'milli' and p['subject'] == 'milli'
+               for p in result['diagnostics']['problems'])
 
 
 def add_instance(path, identifier, cls, name, **slots):
@@ -205,7 +215,6 @@ def test_affine_composition_and_temperature_differences(tmp_path):
     assert transform['scale'] == {'rational': '5/9', 'pi_exponent': 0}
     assert transform['offset'] == {'rational': '45967/180', 'pi_exponent': 0}
     # Absolute freezing point and boiling-to-freezing interval use different equations.
-    from fractions import Fraction
     scale = Fraction(transform['scale']['rational'])
     offset = Fraction(transform['offset']['rational'])
     assert scale * 32 + offset == Fraction('273.15')
@@ -216,7 +225,6 @@ def test_affine_composition_and_temperature_differences(tmp_path):
     assert units['fahrenheit']['si_factor'] is None
     assert not any(p['subject'] in {'degree Celsius', 'millidegree Celsius', 'Fahrenheit'}
                    for p in result['diagnostics']['problems'])
-    assert any(p['category'] == 'scalar_format' for p in result['diagnostics']['scalar_exclusions'])
 
 
 def test_entity_count_and_dependency_diagnostics(tmp_path):
@@ -224,11 +232,22 @@ def test_entity_count_and_dependency_diagnostics(tmp_path):
     add_instance(path, 'count', 'SimpleQuantityKind', 'count', isNumberOfEntities=[('true',)])
     add_instance(path, 'turn', 'SimpleUnit', 'turn', quantityKind=['count'])
     add_instance(path, 'amount', 'SimpleQuantityKind', 'amount of substance', isNumberOfEntities=[('true',)])
+    add_instance(path, 'isq_amount', 'baseQuantityKind', 'ISQ base amount', baseQuantityKind=['amount'])
     add_instance(path, 'unknown_factor', 'QuantityKindFactor', 'unknown^1',
                  quantityKind=['unknown'], exponent=['one'])
     add_instance(path, 'dependent', 'DerivedQuantityKind', 'dependent', factor=['unknown_factor'])
     add_instance(path, 'lost_unit', 'SimpleUnit', 'lost unit', quantityKind=['dependent'])
-    result = conv.ISO80000Converter(str(path)).catalog()
+    # A base quantity flagged as an entity count states two dimensions; that is
+    # refused until a correction declares which statement is wrong.
+    refused = conv.ISO80000Converter(str(path)).catalog()
+    assert refused['resolved']['kinds'] == {}
+    assert [(p['id'], p['category']) for p in refused['diagnostics']['problems']] == [('amount', 'derived_analysis')]
+    corrections = correction_file(tmp_path, path)
+    document = yaml.safe_load(corrections.read_text())
+    document['changes'] = [dict(target='amount', field='entity_count', expected=True, value=False,
+                                reason='Fixture correction', citation='urn:test')]
+    corrections.write_text(yaml.safe_dump(document))
+    result = conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
     kinds = result['resolved']['kinds']
     assert kinds['count']['dimensions'] == {}
     assert kinds['amount']['dimensions'] == {'N': 1}
@@ -264,7 +283,7 @@ def test_prefix_correction_rescales_the_unit_without_touching_the_source_prefix(
     path = model(tmp_path)
     corrections = correction_file(tmp_path, path)
     document = yaml.safe_load(corrections.read_text())
-    document['changes'] = [dict(target='mcelsius', field='prefix', expected='1/1000', value='1/100',
+    document['changes'] = [dict(target='mcelsius', field='scale', expected='1/1000', value='1/100',
                                 reason='Fixture correction', citation='urn:test')]
     corrections.write_text(yaml.safe_dump(document))
     result = conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
@@ -288,8 +307,9 @@ def test_topological_resolution_is_order_independent_and_reports_cycles(tmp_path
     path = model(tmp_path)
     add_instance(path, 'a', 'LinearConversionUnit', 'cycle a', referenceUnit=['b'], factor=['one'])
     add_instance(path, 'b', 'LinearConversionUnit', 'cycle b', referenceUnit=['a'], factor=['one'])
+    # A reference to a declaration that is not a unit is missing from the unit graph.
     add_instance(path, 'missing', 'LinearConversionUnit', 'missing reference',
-                 referenceUnit=['absent'], factor=['one'])
+                 referenceUnit=['unknown'], factor=['one'])
     first = conv.ISO80000Converter(str(path)).catalog()
     assert first['resolved']['units']['a']['conversion'] is None
     assert any(p['category'] == 'dependency_cycle' for p in first['diagnostics']['problems'])
@@ -347,11 +367,9 @@ def test_catalog_strict_accepts_supported_affine_projection(tmp_path):
     tree.write(str(path), encoding='utf-8')
     corrections = correction_file(tmp_path, path)
     command = [sys.executable, str(Path(conv.__file__)), str(path), '--strict', '--corrections', str(corrections)]
-    result = subprocess.run(command + ['--format', 'catalog'], capture_output=True, text=True, encoding='utf-8')
+    result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
     assert result.returncode == 0, result.stderr
     assert yaml.safe_load(result.stdout)['resolved']['units']['celsius']['conversion']['offset']['rational'] == '273'
-    result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
-    assert result.returncode == 1
 
 
 def test_correction_batch_is_atomic_and_cli_keeps_existing_output(tmp_path):
@@ -364,11 +382,11 @@ def test_correction_batch_is_atomic_and_cli_keeps_existing_output(tmp_path):
     converter.load_model()
     with pytest.raises(conv.ConversionError):
         converter.apply_corrections()
-    assert converter.units['celsius']['offset'].to_yaml() == '5463/20'
+    assert converter.units['celsius']['offset'] == conv.Exact(Fraction(5463, 20))
     assert converter.applied_corrections is None
     output = tmp_path / 'existing.yml'
     output.write_text('keep this')
-    result = subprocess.run([sys.executable, str(Path(conv.__file__)), str(path), '--format', 'catalog',
+    result = subprocess.run([sys.executable, str(Path(conv.__file__)), str(path),
                              '--corrections', str(corrections), '-o', str(output)],
                             capture_output=True, text=True, encoding='utf-8')
     assert result.returncode == 2
@@ -379,6 +397,7 @@ def test_correction_batch_is_atomic_and_cli_keeps_existing_output(tmp_path):
 def test_preferred_evidence_replaces_a_provisional_fallback(tmp_path):
     path = model(tmp_path)
     add_instance(path, 'length', 'SimpleQuantityKind', 'length')
+    add_instance(path, 'isq_length', 'baseQuantityKind', 'ISQ base length', baseQuantityKind=['length'])
     add_instance(path, 'metre', 'SimpleUnit', 'metre', quantityKind=['length'])
     # The lower-priority general links form a cycle. The preferred definition
     # is independently grounded in length and must win for both kinds.
@@ -391,10 +410,57 @@ def test_preferred_evidence_replaces_a_provisional_fallback(tmp_path):
         assert converter.kinds[identifier]['units'] == ['metre']
     assert not any(p['category'] == 'dependency_cycle' and p['id'] in {'preferred', 'target'}
                    for p in result['diagnostics']['problems'])
-    scalar_text = conv.render(converter.convert(), converter.problems, converter.corrections)
     tree = etree.parse(str(path))
     tree.getroot()[:] = list(reversed(tree.getroot()[:]))
     tree.write(str(path), encoding='utf-8')
-    reordered = conv.ISO80000Converter(str(path))
-    assert result['resolved'] == reordered.catalog()['resolved']
-    assert scalar_text == conv.render(reordered.convert(), reordered.problems, reordered.corrections)
+    reordered = conv.ISO80000Converter(str(path)).catalog()
+    assert result['resolved'] == reordered['resolved']
+    assert result['diagnostics'] == reordered['diagnostics']
+
+
+def test_dangling_reference_is_an_error(tmp_path):
+    path = model(tmp_path)
+    add_instance(path, 'dangling', 'LinearConversionUnit', 'dangling', referenceUnit=['absent'], factor=['one'])
+    with pytest.raises(conv.ConversionError, match="refers to 'absent'") as error:
+        conv.ISO80000Converter(str(path))
+    assert error.value.declaration == 'dangling'
+
+
+def test_factor_name_disagreement_is_refused_unless_declared(tmp_path):
+    path = model(tmp_path)
+    add_instance(path, 'length', 'SimpleQuantityKind', 'length')
+    add_instance(path, 'isq_length', 'baseQuantityKind', 'ISQ base length', baseQuantityKind=['length'])
+    add_instance(path, 'per_length', 'QuantityKindFactor', 'length^-1', quantityKind=['length'], exponent=['one'])
+    add_instance(path, 'repetency', 'DerivedQuantityKind', 'repetency', factor=['per_length'])
+    refused = conv.ISO80000Converter(str(path)).catalog()
+    assert [(p['id'], p['category']) for p in refused['diagnostics']['problems']] == [
+        ('per_length', 'derived_analysis')]
+    corrections = correction_file(tmp_path, path)
+    document = yaml.safe_load(corrections.read_text())
+    document['changes'] = [dict(target='repetency', field='factors', expected=[['length', '1']],
+                                value=[['length', '-1']], reason='Fixture correction', citation='urn:test')]
+    corrections.write_text(yaml.safe_dump(document))
+    result = conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
+    assert result['resolved']['kinds']['repetency']['dimensions'] == {'L': -1}
+    assert result['declarations']['per_length']['slots']['exponent'] == [{'ref': 'one'}]
+
+
+def test_prefixed_units_follow_a_corrected_reference_name(tmp_path):
+    path = model(tmp_path)
+    corrections = correction_file(tmp_path, path)
+    document = yaml.safe_load(corrections.read_text())
+    document['changes'] = [dict(target='celsius', field='name', expected='degree Celsius', value='degree celsius',
+                                reason='Fixture correction', citation='urn:test')]
+    corrections.write_text(yaml.safe_dump(document))
+    result = conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
+    assert result['resolved']['units']['mcelsius']['name'] == 'millidegree celsius'
+    assert result['declarations']['mcelsius']['name'] == 'millidegree Celsius'
+    # A prefixed name that is not prefix + reference is an undeclared disagreement.
+    tree = etree.parse(str(path))
+    node = next(n for n in tree.getroot() if n.get(conv.XMI_ID) == 'mcelsius')
+    node.set('name', 'thousandth Celsius')
+    tree.write(str(path), encoding='utf-8')
+    document['source_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    corrections.write_text(yaml.safe_dump(document))
+    with pytest.raises(conv.CorrectionError, match='declare its correction'):
+        conv.ISO80000Converter(str(path), corrections_file=str(corrections)).catalog()
