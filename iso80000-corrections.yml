@@ -75,260 +75,20 @@ changes:
     - '1'
   reason: Correct the kinematic-viscosity unit to divide by density, consistently with the corrected quantity definition.
   citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_attopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: attopascal second kilogram per cubic metre
-  value: attopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_attopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: am^2/s
-  value: aPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_centipascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: centipascal second kilogram per cubic metre
-  value: centipascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_centipascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: cm^2/s
-  value: cPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_decapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: decapascal second kilogram per cubic metre
-  value: decapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_decapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: dam^2/s
-  value: daPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_decipascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: decipascal second kilogram per cubic metre
-  value: decipascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_decipascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: dm^2/s
-  value: dPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_exapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: exapascal second kilogram per cubic metre
-  value: exapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_exapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Em^2/s
-  value: EPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_femtopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: femtopascal second kilogram per cubic metre
-  value: femtopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_femtopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: fm^2/s
-  value: fPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_gigapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: gigapascal second kilogram per cubic metre
-  value: gigapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_gigapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Gm^2/s
-  value: GPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_hectopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: hectopascal second kilogram per cubic metre
-  value: hectopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_hectopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: hm^2/s
-  value: hPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_kilopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: kilopascal second kilogram per cubic metre
-  value: kilopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_kilopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: km^2/s
-  value: kPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_megapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: megapascal second kilogram per cubic metre
-  value: megapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_megapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Mm^2/s
-  value: MPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_micropascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: micropascal second kilogram per cubic metre
-  value: micropascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_micropascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: μm^2/s
-  value: μPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_millipascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: millipascal second kilogram per cubic metre
-  value: millipascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_millipascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: mm^2/s
-  value: mPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_nanopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: nanopascal second kilogram per cubic metre
-  value: nanopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_nanopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: nm^2/s
-  value: nPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
 - target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_pascal_second_kilogram_per_cubic_metre
   field: name
   expected: pascal second kilogram per cubic metre
   value: pascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
+  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; its prefixed units follow. The original name and symbol stay in declarations.
   citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
 - target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_pascal_second_kilogram_per_cubic_metre
   field: symbol
   expected: m^2/s
   value: Pa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_petapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: petapascal second kilogram per cubic metre
-  value: petapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_petapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Pm^2/s
-  value: PPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_picopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: picopascal second kilogram per cubic metre
-  value: picopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_picopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: pm^2/s
-  value: pPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_terapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: terapascal second kilogram per cubic metre
-  value: terapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_terapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Tm^2/s
-  value: TPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_yoctopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: yoctopascal second kilogram per cubic metre
-  value: yoctopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_yoctopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: ym^2/s
-  value: yPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_yottapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: yottapascal second kilogram per cubic metre
-  value: yottapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_yottapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Ym^2/s
-  value: YPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_zeptopascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: zeptopascal second kilogram per cubic metre
-  value: zeptopascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_zeptopascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: zm^2/s
-  value: zPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_zettapascal_second_kilogram_per_cubic_metre
-  field: name
-  expected: zettapascal second kilogram per cubic metre
-  value: zettapascal second cubic metre per kilogram
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
-  citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
-- target: ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Units.package_packagedElement_pascal_second_kilogram_per_cubic_metre.instanceSpecification_packagedElement_zettapascal_second_kilogram_per_cubic_metre
-  field: symbol
-  expected: Zm^2/s
-  value: ZPa.s.m^3/kg
-  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; preserve the original name and symbol in declarations.
+  reason: Rename the corrected kinematic-viscosity unit to express reciprocal density; its prefixed units follow. The original name and symbol stay in declarations.
   citation: https://www.nist.gov/pml/special-publication-811/nist-guide-si-chapter-8
 - target: ISO-80000.package_packagedElement_ISO80000-3_Space_and_Time.package_packagedElement_Units.package_packagedElement_litre.instanceSpecification_packagedElement_litre
-  field: prefix
+  field: scale
   expected: 1/10
   value: 1/1000
   reason: The litre is one cubic decimetre, 10^-3 m^3; the source applies the deci prefix to the cubic metre, giving 10^-1 m^3. Prefixed litres chain through this unit.
@@ -361,3 +121,39 @@ changes:
     - '1'
   reason: Correct the isentropic-exponent unit to the product (m^3/Pa)(Pa/m^3), dimension one, consistently with the corrected quantity definition; the source divides instead.
   citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+- target: ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_electric_field_strength.instanceSpecification_packagedElement_electric_field_strength
+  field: factors
+  expected:
+  - - ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_electric_charge.instanceSpecification_packagedElement_electric_charge
+    - '1'
+  - - ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Quantities.package_packagedElement_force.instanceSpecification_packagedElement_force
+    - '1'
+  value:
+  - - ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_electric_charge.instanceSpecification_packagedElement_electric_charge
+    - '-1'
+  - - ISO-80000.package_packagedElement_ISO80000-4_Mechanics.package_packagedElement_Quantities.package_packagedElement_force.instanceSpecification_packagedElement_force
+    - '1'
+  reason: Electric field strength is force per charge. The factor instance is named 'electric charge^-1' but its exponent slot says 1; with the slot, field strength, potential, flux, power and every kind built on them disagree with their own units.
+  citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+- target: ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_initial_phase_of_electric_current.instanceSpecification_packagedElement_initial_phase_of_electric_current
+  field: factors
+  expected:
+  - - ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_electric_current.instanceSpecification_packagedElement_electric_current
+    - '1'
+  value: []
+  reason: An initial phase is an angle; the source flags this kind as dimension one but also gives it the factor electric current^1, which names the quantity whose phase it is.
+  citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+- target: ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_initial_phase_of_electric_voltage.instanceSpecification_packagedElement_initial_phase_of_electric_voltage
+  field: factors
+  expected:
+  - - ISO-80000.package_packagedElement_IEC80000-6_Electromagnetism.package_packagedElement_Quantities.package_packagedElement_voltage.instanceSpecification_packagedElement_voltage
+    - '1'
+  value: []
+  reason: An initial phase is an angle; the source flags this kind as dimension one but also gives it the factor voltage^1, which names the quantity whose phase it is.
+  citation: https://www.omg.org/spec/SysML/20150709/ISO-80000.xmi
+- target: ISO-80000.package_packagedElement_ISO80000-9_Physical_Chemestry_and_Molecular_Physics.package_packagedElement_Quantities.package_packagedElement_amount_of_substance.instanceSpecification_packagedElement_amount_of_substance
+  field: entity_count
+  expected: true
+  value: false
+  reason: Amount of substance is an ISQ base quantity of dimension N, distinct from the dimension-one number of entities; the source also sets isNumberOfEntities on it.
+  citation: https://www.bipm.org/en/publications/si-brochure
